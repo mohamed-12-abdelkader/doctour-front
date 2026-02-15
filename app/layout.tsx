@@ -1,15 +1,19 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Cairo, Tajawal } from "next/font/google";
+import { Box } from "@chakra-ui/react";
 import "./globals.css";
+import { Providers } from "./providers";
+import NavbarDynamic from "./NavbarDynamic";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
+const cairo = Cairo({
+  variable: "--font-cairo",
+  subsets: ["arabic"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+const tajawal = Tajawal({
+  variable: "--font-tajawal",
+  subsets: ["arabic"],
+  weight: ["200", "300", "400", "500", "700", "800", "900"],
 });
 
 export const metadata: Metadata = {
@@ -25,9 +29,15 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${cairo.variable} ${tajawal.variable} antialiased`}
+        style={{ fontFamily: 'var(--font-cairo), sans-serif' }}
       >
-        {children}
+        <Providers>
+          <NavbarDynamic />
+          <Box as="main" pt={["72px", "72px"]}>
+            {children}
+          </Box>
+        </Providers>
       </body>
     </html>
   );

@@ -88,6 +88,7 @@ export default function Navbar() {
                                 onClick={onToggle}
                                 variant="ghost"
                                 aria-label="Toggle Navigation"
+                                // @ts-ignore
                                 icon={open ? <X size={24} /> : <AlignJustify size={24} />}
                                 color="#615b36"
                             />

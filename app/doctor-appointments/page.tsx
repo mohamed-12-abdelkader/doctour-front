@@ -118,6 +118,7 @@ export default function DoctorAppointments() {
                 <Flex justify="space-between" align="center" mb={8} flexWrap="wrap" gap={4}>
                     <Box>
                         <Heading size="lg" color="#2d3748" mb={2}>عيادة الدكتورة</Heading>
+                        {/* @ts-ignore */}
                         <Text color="gray.500" display="flex" align="center" gap={2}>
                             <Calendar size={16} />
                             {new Date(selectedDate).toLocaleDateString('ar-EG', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}

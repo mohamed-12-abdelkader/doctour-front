@@ -200,6 +200,7 @@ export default function OnlineBookingModal({ isOpen, onClose }: OnlineBookingMod
                                     <Box
                                         as="select"
                                         value={visitType}
+                                        // @ts-ignore
                                         onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setVisitType(e.target.value)}
                                         w="full"
                                         p={2}

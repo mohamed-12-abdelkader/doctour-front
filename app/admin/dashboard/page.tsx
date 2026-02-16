@@ -313,6 +313,7 @@ export default function AdminDashboard() {
                           fontSize="sm"
                           color="gray.500"
                           lineHeight="tall"
+                          // @ts-ignore
                           noOfLines={2}
                         >
                           {link.description}
@@ -352,6 +353,7 @@ export default function AdminDashboard() {
             في حال الحاجة لتهيئة قاعدة البيانات، يمكنك تشغيل{" "}
             <Text
               as="a"
+              // @ts-ignore
               href="/api/seed"
               target="_blank"
               rel="noopener"

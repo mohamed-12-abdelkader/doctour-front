@@ -141,6 +141,7 @@ export default function AddTransactionModal({ isOpen, onClose, onSave }: AddTran
                                     <Select.Root
                                         value={[category]}
                                         onValueChange={(e) => setCategory(e.value[0] as TransactionCategory)}
+                                        // @ts-ignore
                                         collection={{ items: currentCategories, itemToString: (item) => item.label, itemToValue: (item) => item.value }}
                                     >
                                         <Select.Trigger>

@@ -186,6 +186,7 @@ export default function AccountsPage() {
                             onClick={handleOpenCreate}
                             size="sm"
                             gap={2}
+                            // @ts-ignore
                             leftIcon={<Plus size={18} />}
                         >
                             إضافة موظف

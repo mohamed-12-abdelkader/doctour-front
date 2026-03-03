@@ -200,7 +200,7 @@ export default function Navbar() {
 
               {/* لوجو + زر حجز أو تسجيل خروج (ديسكتوب فقط) */}
               <Flex align="center" gap={{ base: 2, md: 4 }} flexShrink={0}>
-                {mounted && loggedIn ? (
+                {mounted && loggedIn && (
                   <Button
                     display={{ base: "none", md: "inline-flex" }}
                     onClick={handleLogout}
@@ -213,20 +213,6 @@ export default function Navbar() {
                   >
                     <LogOut size={16} />
                     تسجيل خروج
-                  </Button>
-                ) : (
-                  <Button
-                    display={{ base: "none", md: "inline-flex" }}
-                    onClick={onBookingOpen}
-                    variant="solid"
-                    bg={BRAND.color}
-                    color="white"
-                    _hover={{ bg: BRAND.colorHover }}
-                    size="sm"
-                    borderRadius="full"
-                    px={6}
-                  >
-                    حجز موعد
                   </Button>
                 )}
                 <Logo />

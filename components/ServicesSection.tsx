@@ -1,16 +1,17 @@
 'use client'
 
-import { Box, Container, Heading, Grid, Text, Stack, Card, Flex } from '@chakra-ui/react'
+import { Box, Container, Heading, Grid, Text, Stack, Flex } from '@chakra-ui/react'
 import { services } from '@/data/services'
 import { MotionBox, fadeInUp, staggerContainer } from './MotionBox'
 import { useState } from 'react'
 import { Sparkles, Wand2, Syringe, Star, ArrowLeft } from 'lucide-react'
 import { AnimatePresence } from 'framer-motion'
 
+const BRAND = '#5d562c'
+
 export default function ServicesSection() {
     const [activeTab, setActiveTab] = useState(0)
 
-    // Icons mapping
     const getIcon = (category: string) => {
         if (category.includes('البشرة')) return Sparkles;
         if (category.includes('ياج') || category.includes('تفتيح')) return Wand2;
@@ -19,38 +20,39 @@ export default function ServicesSection() {
     }
 
     return (
-        <Box id="services" py={16} bg="white" dir="rtl" position="relative" overflow="hidden">
-            <Container maxW={'7xl'}>
-                <Stack textAlign={'center'} align={'center'} mb={16}>
+        <Box
+            id="services"
+            py={16}
+            bg="white"
+            dir="rtl"
+            position="relative"
+            overflow="hidden"
+            fontFamily="var(--font-tajawal), Tajawal, sans-serif"
+        >
+            <Container maxW="7xl">
+                <Stack textAlign="center" align="center" mb={16}>
                     <MotionBox variants={fadeInUp} initial="hidden" whileInView="visible" viewport={{ once: true }}>
                         <Flex align="center" justify="center" gap={2} mb={4}>
-                            <Box h="1px" w="40px" bg="#615b36" />
-                            <Text color="#615b36" fontWeight="bold" letterSpacing="wider">خدماتنا المتميزة</Text>
-                            <Box h="1px" w="40px" bg="#615b36" />
+                            <Box h="1px" w="40px" bg={BRAND} />
+                            <Text color={BRAND} fontWeight="bold" letterSpacing="wider">خدماتنا المتميزة</Text>
+                            <Box h="1px" w="40px" bg={BRAND} />
                         </Flex>
                         <Heading
-                            fontSize={{ base: '3xl', md: '5xl' }}
+                            fontSize={{ base: '2.5xl', md: '4xl', lg: '5xl' }}
                             fontWeight="800"
-                            color="gray.900"
+                            color={BRAND}
                             mb={6}
+                            fontFamily="var(--font-tajawal), Tajawal, sans-serif"
                         >
-                            تألقي بجمال <Box as="span" color="#615b36">طبيعي</Box>
+                            أمانه — ثقة — جودة
                         </Heading>
-                        <Text color="gray.500" fontSize="lg" maxW="2xl">
+                        <Text color="gray.600" fontSize="lg" maxW="2xl" fontFamily="var(--font-tajawal), Tajawal, sans-serif">
                             نقدم أحدث الحلول التجميلية غير الجراحية لتعزيز جمالك الطبيعي وثقتك بنفسك
                         </Text>
                     </MotionBox>
                 </Stack>
 
-                {/* Custom Tabs */}
-                <Flex
-                    justify="center"
-                    wrap="wrap"
-                    gap={4}
-                    mb={16}
-                    position="relative"
-                    zIndex={1}
-                >
+                <Flex justify="center" wrap="wrap" gap={4} mb={16} position="relative" zIndex={1}>
                     {services.map((category, index) => {
                         const Icon = getIcon(category.category);
                         const isActive = activeTab === index;
@@ -62,21 +64,22 @@ export default function ServicesSection() {
                                 px={{ base: 6, md: 8 }}
                                 py={{ base: 3, md: 4 }}
                                 rounded="full"
-                                bg={isActive ? '#615b36' : 'white'}
+                                bg={isActive ? BRAND : 'white'}
                                 color={isActive ? 'white' : 'gray.600'}
                                 border="1px solid"
-                                borderColor={isActive ? '#615b36' : 'gray.200'}
+                                borderColor={isActive ? BRAND : 'gray.200'}
                                 transition="all 0.3s cubic-bezier(0.4, 0, 0.2, 1)"
                                 _hover={{
                                     transform: 'translateY(-2px)',
                                     boxShadow: 'lg',
-                                    borderColor: '#615b36',
-                                    color: isActive ? 'white' : '#615b36'
+                                    borderColor: BRAND,
+                                    color: isActive ? 'white' : BRAND,
                                 }}
                                 display="flex"
                                 alignItems="center"
                                 gap={3}
                                 position="relative"
+                                fontFamily="var(--font-tajawal), Tajawal, sans-serif"
                             >
                                 <Icon size={20} />
                                 <Text fontWeight="bold">{category.category}</Text>
@@ -89,7 +92,7 @@ export default function ServicesSection() {
                                         transform="translateX(-50%)"
                                         w="6px"
                                         h="6px"
-                                        bg="#615b36"
+                                        bg={BRAND}
                                         rounded="full"
                                     />
                                 )}
@@ -98,7 +101,6 @@ export default function ServicesSection() {
                     })}
                 </Flex>
 
-                {/* Content Area */}
                 <Box>
                     <AnimatePresence mode="wait">
                         <MotionBox
@@ -127,20 +129,21 @@ export default function ServicesSection() {
                                             justify="space-between"
                                             transition="all 0.3s"
                                             _hover={{
-                                                borderColor: '#615b36',
-                                                boxShadow: '0 10px 30px -10px rgba(97, 91, 54, 0.15)',
-                                                transform: 'translateY(-4px)'
+                                                borderColor: BRAND,
+                                                boxShadow: '0 10px 30px -10px rgba(93, 86, 44, 0.2)',
+                                                transform: 'translateY(-4px)',
                                             }}
                                             className="group"
                                             role="group"
                                             position="relative"
                                             overflow="hidden"
+                                            fontFamily="var(--font-tajawal), Tajawal, sans-serif"
                                         >
                                             <Box position="relative" zIndex={1}>
-                                                <Heading size="md" mb={1} color="gray.800" _groupHover={{ color: '#615b36' }} transition="color 0.2s">
+                                                <Heading size="md" mb={1} color="gray.800" _groupHover={{ color: BRAND }} transition="color 0.2s" fontFamily="var(--font-tajawal), Tajawal, sans-serif">
                                                     {item.name}
                                                 </Heading>
-                                                <Text fontSize="sm" color="gray.400">احجزي الآن</Text>
+                                                <Text fontSize="sm" color="gray.500">احجزي الآن</Text>
                                             </Box>
 
                                             <Box
@@ -152,7 +155,7 @@ export default function ServicesSection() {
                                                 alignItems="center"
                                                 justifyContent="center"
                                                 color="gray.400"
-                                                _groupHover={{ bg: '#615b36', color: 'white' }}
+                                                _groupHover={{ bg: BRAND, color: 'white' }}
                                                 transition="all 0.3s"
                                             >
                                                 <ArrowLeft size={18} />

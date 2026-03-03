@@ -1,32 +1,136 @@
 'use client'
 
 import { Box, Container, Stack, Text, Link, Flex } from '@chakra-ui/react'
+import { doctorInfo } from '@/data/services'
+
+const FOOTER_BG = '#5d562c'
+const ICON_COLOR = '#d4d0b8'
+
+const FacebookIcon = () => (
+  <Box as="svg" w="22px" h="22px" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+    <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+  </Box>
+)
+
+const InstagramIcon = () => (
+  <Box as="svg" w="22px" h="22px" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+    <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z" />
+  </Box>
+)
+
+const TikTokIcon = () => (
+  <Box as="svg" w="22px" h="22px" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+    <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64 2.93 2.93 0 0 1 .88.13V9.4a6.84 6.84 0 0 0-1-.05A6.33 6.33 0 0 0 5 20.1a6.34 6.34 0 0 0 10.86-4.43v-7a8.16 8.16 0 0 0 4.77 1.52v-3.4a4.85 4.85 0 0 1-1-.1z" />
+  </Box>
+)
 
 export default function Footer() {
-    return (
-        <Box
-            bg="#615b36"
-            color="white"
-            dir="rtl"
-            mt={10}
-        >
-            <Container as={Stack} maxW={'6xl'} py={10}>
-                <Flex direction={{ base: 'column', md: 'row' }} justify="space-between" align="center" gap={6}>
-                    <Stack align={{ base: 'center', md: 'flex-start' }}>
-                        <Text fontSize="lg" fontWeight="bold">دكتورة ريم عاطف</Text>
-                        <Text fontSize="sm">ماجستير الجلدية والتجميل والليزر</Text>
-                    </Stack>
+  const social = doctorInfo.social ?? {
+    facebook: '#',
+    instagram: '#',
+    tiktok: '#',
+  }
 
-                    <Stack direction={'row'} gap={6}>
-                        <Link href={'#'}>الرئيسية</Link>
-                        <Link href={'#services'}>الخدمات</Link>
-                        <Link href={'#contact'}>تواصل معنا</Link>
-                    </Stack>
-                </Flex>
-                <Box borderTopWidth={1} borderStyle={'solid'} borderColor={'whiteAlpha.300'} pt={6} mt={6} textAlign="center">
-                    <Text fontSize="sm">© {new Date().getFullYear()} جميع الحقوق محفوظة لدكتورة ريم عاطف. تم التطوير بواسطة DocTour.</Text>
-                </Box>
-            </Container>
+  return (
+    <Box
+      bg={FOOTER_BG}
+      color={ICON_COLOR}
+      dir="rtl"
+      mt={12}
+      fontFamily="var(--font-tajawal), Tajawal, sans-serif"
+    >
+      <Container maxW="6xl" py={10}>
+        <Flex
+          direction={{ base: 'column', md: 'row' }}
+          justify="space-between"
+          align={{ base: 'center', md: 'center' }}
+          gap={8}
+        >
+          <Stack align={{ base: 'center', md: 'flex-start' }} gap={1}>
+            <Text fontSize="xl" fontWeight="800" color="white">
+              دكتورة ريم عاطف
+            </Text>
+            <Text fontSize="sm" color={ICON_COLOR} opacity={0.95}>
+              ماجستير الجلدية والتجميل والليزر
+            </Text>
+          </Stack>
+
+          <Stack direction="row" gap={4} align="center">
+            <Link
+              href={social.facebook}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="فيسبوك"
+              color={ICON_COLOR}
+              _hover={{ color: 'white', transform: 'translateY(-2px)' }}
+              transition="all 0.2s"
+            >
+              <FacebookIcon />
+            </Link>
+            <Link
+              href={social.instagram}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="انستغرام"
+              color={ICON_COLOR}
+              _hover={{ color: 'white', transform: 'translateY(-2px)' }}
+              transition="all 0.2s"
+            >
+              <InstagramIcon />
+            </Link>
+            <Link
+              href={social.tiktok}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="تيك توك"
+              color={ICON_COLOR}
+              _hover={{ color: 'white', transform: 'translateY(-2px)' }}
+              transition="all 0.2s"
+            >
+              <TikTokIcon />
+            </Link>
+          </Stack>
+
+          <Stack
+            direction={{ base: 'column', md: 'row' }}
+            gap={{ base: 2, md: 6 }}
+            align="center"
+          >
+            <Link href="/#" color={ICON_COLOR} _hover={{ color: 'white' }} fontSize="sm">
+              الرئيسية
+            </Link>
+            <Link href="/#services" color={ICON_COLOR} _hover={{ color: 'white' }} fontSize="sm">
+              الخدمات
+            </Link>
+            <Link href="/#contact" color={ICON_COLOR} _hover={{ color: 'white' }} fontSize="sm">
+              تواصل معنا
+            </Link>
+          </Stack>
+        </Flex>
+
+        <Box
+          borderTopWidth="1px"
+          borderStyle="solid"
+          borderColor="whiteAlpha.25"
+          pt={6}
+          mt={8}
+        >
+          <Flex
+            direction={{ base: 'column', md: 'row' }}
+            align="center"
+            justify="center"
+            gap={4}
+            flexWrap="wrap"
+          >
+            <Text fontSize="sm" color={ICON_COLOR} opacity={0.9}>
+              © {new Date().getFullYear()} جميع الحقوق محفوظة لدكتورة ريم عاطف.
+            </Text>
+            <Text fontSize="sm" color={ICON_COLOR} opacity={0.9}>
+              تم تطوير هذا الموقع بواسطة Next Coding
+            </Text>
+          </Flex>
         </Box>
-    )
+      </Container>
+    </Box>
+  )
 }

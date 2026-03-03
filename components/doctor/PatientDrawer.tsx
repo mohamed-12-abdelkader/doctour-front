@@ -31,7 +31,7 @@ export default function PatientDrawer({ isOpen, onClose, patient, currentAppoint
             <Drawer.Root open={isOpen} onOpenChange={(e) => !e.open && onClose()} placement="start" size="lg">
                 <Drawer.Backdrop />
                 <Drawer.Positioner>
-                    <Drawer.Content dir="rtl" fontFamily="var(--font-tajawal)">
+                    <Drawer.Content dir="rtl">
                         <Drawer.CloseTrigger />
                         <Drawer.Header borderBottomWidth="1px">
                             <VStack align="start" gap={1}>

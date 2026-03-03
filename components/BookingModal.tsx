@@ -57,22 +57,18 @@ export default function BookingModal({ isOpen, onClose, onSave, initialData }: B
     }, [isOpen, initialData])
 
     const handleSave = () => {
-        if (!name || !date || !time || !phone) {
+        if (!name || !date || !phone) {
             alert('يرجى ملء جميع الحقول المطلوبة');
             return;
         }
-
-        // Combine date and time to ISO string
-        const bookingDateTime = new Date(`${date}T${time}:00.000Z`).toISOString();
-
+        // بنبعت التاريخ كـ YYYY-MM-DD حسب الـ API
         const bookingData = {
-            customerName: name,
-            customerPhone: phone,
-            appointmentDate: bookingDateTime,
+            name,
+            phone,
+            date,               // YYYY-MM-DD
             amountPaid: parseFloat(amountPaid) || 0,
-            visitType: visitType
+            visitType,
         };
-
         onSave(bookingData);
     }
 
@@ -97,7 +93,6 @@ export default function BookingModal({ isOpen, onClose, onSave, initialData }: B
                 >
                     <Dialog.Content
                         dir="rtl"
-                        fontFamily="var(--font-tajawal)"
                         bg="white"
                         borderRadius="2xl"
                         overflow="hidden"
@@ -207,7 +202,6 @@ export default function BookingModal({ isOpen, onClose, onSave, initialData }: B
                                             borderColor: '#E2E8F0',
                                             backgroundColor: '#F7FAFC',
                                             fontSize: '1rem',
-                                            fontFamily: 'var(--font-tajawal)',
                                             outline: 'none',
                                         }}
                                         onFocus={(e) => {
@@ -221,6 +215,7 @@ export default function BookingModal({ isOpen, onClose, onSave, initialData }: B
                                     >
                                         <option value="checkup">كشف</option>
                                         <option value="followup">إعادة</option>
+                                        <option value="consultation">استشارة</option>
                                     </select>
                                 </Box>
 
@@ -248,6 +243,6 @@ export default function BookingModal({ isOpen, onClose, onSave, initialData }: B
                     </Dialog.Content>
                 </Dialog.Positioner>
             </Portal>
-        </Dialog.Root>
+        </Dialog.Root >
     )
 }

@@ -65,7 +65,7 @@ export default function AddTransactionModal({ isOpen, onClose, onSave }: AddTran
         <Dialog.Root open={isOpen} onOpenChange={(e) => !e.open && handleClose()} size="lg">
             <Dialog.Backdrop backdropFilter="blur(4px)" />
             <Dialog.Positioner>
-                <Dialog.Content dir="rtl" fontFamily="var(--font-tajawal)">
+                <Dialog.Content dir="rtl">
                     <Dialog.CloseTrigger />
                     <Dialog.Header fontSize="lg" fontWeight="bold">إضافة عملية جديدة</Dialog.Header>
                     <Dialog.Body>

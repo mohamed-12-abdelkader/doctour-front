@@ -1,28 +1,81 @@
 'use client'
 
 import {
-    Box, Container, Flex, Heading, Text, Button, Badge, Table, IconButton, HStack, Input, SimpleGrid, Icon, Spinner, Dialog, Portal, NativeSelectRoot, NativeSelectField
+    Box, Container, Flex, Heading, Text, Button, Badge, Table, IconButton, HStack, Input, SimpleGrid, Spinner, Dialog, Portal, Card
 } from '@chakra-ui/react'
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { Booking, BookingStatus } from '@/types/booking'
-import { Check, X, Globe, Clock, User, Search, AlertCircle, CheckCircle2, XCircle } from 'lucide-react'
+import { Globe, User, Search, AlertCircle, CheckCircle2, XCircle, ChevronLeft, ChevronRight, Clock } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import api from '@/lib/axios'
 
 const MotionRow = motion(Table.Row)
 
+const todayStr = () => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function buildCalendarDays(year: number, month: number): (Date | null)[] {
+    const firstDay = new Date(year, month, 1)
+    const lastDay = new Date(year, month + 1, 0)
+    const startOffset = (firstDay.getDay() + 1) % 7
+    const days: (Date | null)[] = Array(startOffset).fill(null)
+    for (let d = 1; d <= lastDay.getDate(); d++) days.push(new Date(year, month, d))
+    while (days.length % 7 !== 0) days.push(null)
+    return days
+}
+
+const AR_WEEKDAYS = ['السبت', 'الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة']
+
+/** تحويل وقت بصيغة 24 ساعة (مثل "13:00") إلى عرض عادي 12 ساعة (مثل "1:00 م") */
+function formatTime12(timeStr: string): string {
+    if (!timeStr || typeof timeStr !== 'string') return timeStr
+    const [h, m] = timeStr.trim().split(':').map(Number)
+    if (Number.isNaN(h)) return timeStr
+    const hour = h % 24
+    const hour12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour
+    const minute = Number.isNaN(m) ? 0 : m
+    const ampm = hour < 12 ? 'ص' : 'م'
+    return `${hour12}:${String(minute).padStart(2, '0')} ${ampm}`
+}
+
 export default function OnlineBookingsPage() {
     const [bookings, setBookings] = useState<Booking[]>([])
     const [isLoading, setIsLoading] = useState(true)
     const [searchQuery, setSearchQuery] = useState('')
-    const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'confirmed' | 'cancelled'>('all')
-    const [filterDate, setFilterDate] = useState('')
+    const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'confirmed' | 'rejected' | 'cancelled'>('all')
+    const [filterDate, setFilterDate] = useState(() => todayStr())
+    const [calViewDate, setCalViewDate] = useState(() => {
+        const d = new Date()
+        d.setDate(1)
+        return d
+    })
     const [cancelId, setCancelId] = useState<string | number | null>(null)
+    /** معطيات الـ response بعد تأكيد الحجز — لظهور مودال الموعد المتوقع للكشف */
+    const [confirmResult, setConfirmResult] = useState<{
+        expectedExaminationTime: string
+        positionInQueue: number
+        totalInDay: number
+        workingHours: { start: string; end: string }
+        customerName: string
+    } | null>(null)
 
     // We can use a toast or just simple alerts. Chakra v3 usually has a toast provider, 
     // but the file didn't have one setup explicitly. We'll use simple alerts or console for errors 
     // to be safe, or just conditional rendering of error states. 
     // Actually, let's keep it simple with console errors for now as the user didn't ask for error UI.
+
+    const calYear = calViewDate.getFullYear()
+    const calMonth = calViewDate.getMonth()
+    const calendarDays = useMemo(() => buildCalendarDays(calYear, calMonth), [calYear, calMonth])
+    const prevCalMonth = () => setCalViewDate(d => new Date(d.getFullYear(), d.getMonth() - 1, 1))
+    const nextCalMonth = () => setCalViewDate(d => new Date(d.getFullYear(), d.getMonth() + 1, 1))
+    const resetToToday = () => {
+        setFilterDate(todayStr())
+        setCalViewDate(new Date(new Date().getFullYear(), new Date().getMonth(), 1))
+    }
+    const handleDayClick = (dateStr: string) => setFilterDate(dateStr)
 
     const fetchBookings = useCallback(async () => {
         setIsLoading(true)
@@ -32,7 +85,7 @@ export default function OnlineBookingsPage() {
             if (filterDate) params.date = filterDate
 
             const response = await api.get('/bookings/online', { params })
-            setBookings(response.data)
+            setBookings(Array.isArray(response.data) ? response.data : (response.data?.bookings ?? []))
         } catch (error) {
             console.error('Failed to fetch bookings:', error)
         } finally {
@@ -93,19 +146,33 @@ export default function OnlineBookingsPage() {
 
     const updateBookingStatus = async (id: string | number, newStatus: BookingStatus) => {
         try {
-            // Optimistic update
-            setBookings(prev => prev.map(b =>
-                b.id === id ? { ...b, status: newStatus } : b
-            ))
+            const { data } = await api.patch(`/bookings/online/${id}/status`, { status: newStatus })
 
-            await api.patch(`/bookings/online/${id}/status`, { status: newStatus })
+            // استبدال الحجز بالبيانات المحدثة من الـ API (الـ booking قد يحتوي appointmentDate وغيره)
+            const updated = data?.booking ?? data
+            if (updated && typeof updated === 'object') {
+                setBookings(prev => prev.map(b =>
+                    b.id === id ? { ...b, ...updated, status: newStatus } : b
+                ))
+            } else {
+                setBookings(prev => prev.map(b =>
+                    b.id === id ? { ...b, status: newStatus } : b
+                ))
+            }
 
-            // Optionally refresh to ensure data consistency
-            // fetchBookings() 
+            // عند التأكيد: إظهار مودال الموعد المتوقع للكشف
+            if (newStatus === 'confirmed' && data?.expectedExaminationTime != null) {
+                setConfirmResult({
+                    expectedExaminationTime: data.expectedExaminationTime ?? '',
+                    positionInQueue: data.positionInQueue ?? 0,
+                    totalInDay: data.totalInDay ?? 0,
+                    workingHours: data.workingHours ?? { start: '—', end: '—' },
+                    customerName: data.booking?.customerName ?? data.customerName ?? 'العميل',
+                })
+            }
         } catch (error) {
             console.error(`Failed to update booking ${id} to ${newStatus}`, error)
             alert('فشل تحديث حالة الحجز')
-            // Revert changes could go here
             fetchBookings()
         }
     }
@@ -143,21 +210,22 @@ export default function OnlineBookingsPage() {
         }
     }
 
-    const formatTime = (booking: Booking) => {
-        if (booking.bookingTime && !booking.bookingTime.includes('T')) return booking.bookingTime;
-        const dateStr = booking.appointmentDate || booking.bookingTime;
-        if (!dateStr) return '--:--';
-        return new Date(dateStr).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
-    }
-
-    const formatDate = (booking: Booking) => {
-        const dateStr = booking.appointmentDate || booking.bookingTime;
-        if (!dateStr) return '';
-        return new Date(dateStr).toLocaleDateString('ar-EG');
+    const formatPreferredDateTime = (booking: Booking) => {
+        // الأونلاين: بيستخدم preferredDate + preferredTime
+        if (booking.preferredDate) {
+            const d = new Date(booking.preferredDate).toLocaleDateString('ar-EG')
+            const t = booking.preferredTime || '--:--'
+            return `${d} — ${t}`
+        }
+        // لو تم التأكيد (appointmentDate حُدِد)
+        if (booking.appointmentDate) {
+            return new Date(booking.appointmentDate).toLocaleString('ar-EG', { dateStyle: 'short', timeStyle: 'short' })
+        }
+        return 'لم يحدد بعد'
     }
 
     return (
-        <Box minH="100vh" bg="#f8fafc" dir="rtl" fontFamily="var(--font-tajawal)">
+        <Box minH="100vh" bg="#f8fafc" dir="rtl">
             <Container maxW="8xl" py={8}>
 
                 {/* Header & Title */}
@@ -217,8 +285,8 @@ export default function OnlineBookingsPage() {
                 </SimpleGrid>
 
                 {/* Filters & Search */}
-                <Flex gap={4} mb={6} flexWrap="wrap">
-                    <Box position="relative" flex={1} maxW={{ md: "400px" }}>
+                <Flex gap={4} mb={6} flexWrap="wrap" align="flex-start">
+                    <Box position="relative" flex={1} minW={{ base: '100%', md: '280px' }} maxW={{ md: "400px" }}>
                         <Input
                             placeholder="بحث باسم المريض أو رقم الهاتف..."
                             bg="white"
@@ -235,18 +303,82 @@ export default function OnlineBookingsPage() {
                             <Search size={18} />
                         </Box>
                     </Box>
-                    <Box maxW="200px">
-                        <Input
-                            type="date"
-                            bg="white"
-                            h="45px"
-                            rounded="lg"
-                            value={filterDate}
-                            onChange={(e) => setFilterDate(e.target.value)}
-                        />
-                    </Box>
-                    <HStack bg="white" p={1} rounded="lg" shadow="sm" border="1px solid" borderColor="gray.100">
-                        {(['all', 'pending', 'confirmed', 'cancelled'] as const).map((status) => (
+                    {/* Calendar picker */}
+                    <Card.Root bg="white" shadow="sm" borderRadius="2xl" overflow="hidden" border="1px solid" borderColor="gray.100" flexShrink={0}>
+                        <Box bg="linear-gradient(135deg, #6f6a40 0%, #85805a 100%)" px={4} py={2.5}>
+                            <Flex align="center" justify="space-between">
+                                <IconButton aria-label="الشهر السابق" size="sm" variant="ghost" color="white" _hover={{ bg: "whiteAlpha.200" }} onClick={prevCalMonth}>
+                                    <ChevronRight size={18} />
+                                </IconButton>
+                                <Flex align="center" gap={2}>
+                                    <Text fontWeight="bold" color="white" fontSize="md">
+                                        {calViewDate.toLocaleDateString("ar-EG", { month: "long", year: "numeric" })}
+                                    </Text>
+                                    <Button size="xs" variant="outline" color="white" borderColor="whiteAlpha.500" _hover={{ bg: "whiteAlpha.200" }} onClick={resetToToday} borderRadius="full" px={2.5}>
+                                        اليوم
+                                    </Button>
+                                </Flex>
+                                <IconButton aria-label="الشهر التالي" size="sm" variant="ghost" color="white" _hover={{ bg: "whiteAlpha.200" }} onClick={nextCalMonth}>
+                                    <ChevronLeft size={18} />
+                                </IconButton>
+                            </Flex>
+                        </Box>
+                        {/* أيام الأسبوع: السبت، الأحد، ... أوضح */}
+                        <Box display="grid" gridTemplateColumns="repeat(7,1fr)" bg="#eae8dc" borderBottom="2px solid" borderColor="#b8b399">
+                            {AR_WEEKDAYS.map(d => (
+                                <Box key={d} textAlign="center" py={2.5}>
+                                    <Text fontSize="sm" fontWeight="bold" color="#6f6a40">{d}</Text>
+                                </Box>
+                            ))}
+                        </Box>
+                        <Box display="grid" gridTemplateColumns="repeat(7,1fr)" p={2} gap={0.5}>
+                            {calendarDays.map((date, idx) => {
+                                if (!date) return <Box key={`empty-${idx}`} />
+                                const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+                                const isToday = dateStr === todayStr()
+                                const isSelected = dateStr === filterDate
+                                const dayNames = ['أحد', 'اثنين', 'ثلاثاء', 'أربعاء', 'خميس', 'جمعة', 'سبت']
+                                return (
+                                    <Box
+                                        key={dateStr}
+                                        position="relative"
+                                        onClick={() => handleDayClick(dateStr)}
+                                        cursor="pointer"
+                                        display="flex"
+                                        flexDirection="column"
+                                        alignItems="center"
+                                        justifyContent="center"
+                                        h="44px"
+                                        borderRadius="lg"
+                                        transition="all 0.15s"
+                                        userSelect="none"
+                                        bg={isSelected ? "#6f6a40" : "transparent"}
+                                        color={isSelected ? "white" : isToday ? "#6f6a40" : "gray.700"}
+                                        fontWeight={isSelected || isToday ? "bold" : "normal"}
+                                        _hover={{
+                                            bg: isSelected ? "#5c5733" : "#f0ebe0",
+                                            transform: "scale(1.05)",
+                                        }}
+                                    >
+                                        {isToday && !isSelected && (
+                                            <Box position="absolute" inset="2px" borderRadius="md" border="2px solid" borderColor="#9d9870" pointerEvents="none" />
+                                        )}
+                                        <Text fontSize="xs" opacity={isSelected ? 0.9 : 0.8} lineHeight={1} mb="1px">{dayNames[date.getDay()]}</Text>
+                                        <Text fontSize="sm" lineHeight={1}>{date.getDate()}</Text>
+                                    </Box>
+                                )
+                            })}
+                        </Box>
+                        {filterDate && (
+                            <Box px={3} py={2} bg="gray.50" borderTop="1px solid" borderColor="gray.100">
+                                <Text fontSize="xs" color="gray.600" textAlign="center">
+                                    المحدد: {new Date(filterDate + "T12:00:00").toLocaleDateString("ar-EG", { weekday: "short", day: "numeric", month: "short", year: "numeric" })}
+                                </Text>
+                            </Box>
+                        )}
+                    </Card.Root>
+                    <HStack bg="white" p={1} rounded="lg" shadow="sm" border="1px solid" borderColor="gray.100" flexWrap="wrap">
+                        {(['all', 'pending', 'confirmed', 'rejected', 'cancelled'] as const).map((status) => (
                             <Button
                                 key={status}
                                 size="sm"
@@ -258,6 +390,7 @@ export default function OnlineBookingsPage() {
                                 {status === 'all' && 'الكل'}
                                 {status === 'pending' && 'انتظار'}
                                 {status === 'confirmed' && 'مؤكد'}
+                                {status === 'rejected' && 'مرفوض'}
                                 {status === 'cancelled' && 'ملغي'}
                             </Button>
                         ))}
@@ -271,7 +404,7 @@ export default function OnlineBookingsPage() {
                             <Table.Row>
                                 <Table.ColumnHeader textAlign="right" py={4} fontSize="sm" color="gray.600">المريض</Table.ColumnHeader>
                                 <Table.ColumnHeader textAlign="right" py={4} fontSize="sm" color="gray.600">معلومات الاتصال</Table.ColumnHeader>
-                                <Table.ColumnHeader textAlign="right" py={4} fontSize="sm" color="gray.600">توقيت الحجز</Table.ColumnHeader>
+                                <Table.ColumnHeader textAlign="right" py={4} fontSize="sm" color="gray.600">التاريخ والوقت المفضلنين</Table.ColumnHeader>
                                 <Table.ColumnHeader textAlign="right" py={4} fontSize="sm" color="gray.600">الحالة</Table.ColumnHeader>
                                 <Table.ColumnHeader textAlign="right" py={4} fontSize="sm" color="gray.600">إجراءات</Table.ColumnHeader>
                             </Table.Row>
@@ -303,8 +436,9 @@ export default function OnlineBookingsPage() {
                                                     <Box>
                                                         <Text fontWeight="bold" color="gray.800">{booking.customerName}</Text>
                                                         <Text fontSize="xs" color="gray.500">
-                                                            {/* Created At or just Date */}
-                                                            {formatDate(booking)}
+                                                            {booking.createdAt
+                                                                ? new Date(booking.createdAt).toLocaleDateString('ar-EG')
+                                                                : ''}
                                                         </Text>
                                                     </Box>
                                                 </Flex>
@@ -318,31 +452,29 @@ export default function OnlineBookingsPage() {
                                                 </Box>
                                             </Table.Cell>
                                             <Table.Cell py={4}>
-                                                <Badge variant="surface" colorPalette="blue" size="sm">
-                                                    <HStack gap={1}>
-                                                        <Clock size={12} />
-                                                        <Text>{formatTime(booking)}</Text>
-                                                    </HStack>
-                                                </Badge>
+                                                <Box>
+                                                    <Text fontSize="sm" fontWeight="medium" color={booking.appointmentDate ? 'green.600' : 'orange.500'}>
+                                                        {formatPreferredDateTime(booking)}
+                                                    </Text>
+                                                    {!booking.appointmentDate && (
+                                                        <Text fontSize="xs" color="gray.400">بانتظار التأكيد</Text>
+                                                    )}
+                                                </Box>
                                             </Table.Cell>
                                             <Table.Cell py={4}>
                                                 {getStatusBadge(booking.status)}
                                             </Table.Cell>
                                             <Table.Cell py={4}>
-                                                <NativeSelectRoot size="xs" minW="140px">
-                                                    <NativeSelectField
-                                                        value={booking.status}
-                                                        onChange={(e) => handleStatusChange(booking.id, e.target.value as BookingStatus)}
-                                                        bg="white"
-                                                        borderColor="gray.200"
-                                                        rounded="md"
-                                                        _focus={{ borderColor: "purple.400" }}
-                                                    >
-                                                        <option value="pending">قيد الانتظار</option>
-                                                        <option value="confirmed">مؤكد</option>
-                                                        <option value="cancelled">ملغي</option>
-                                                    </NativeSelectField>
-                                                </NativeSelectRoot>
+                                                <Box as="select"
+                                                    value={booking.status}
+                                                    onChange={(e: React.ChangeEvent<HTMLSelectElement>) => handleStatusChange(booking.id, e.target.value as BookingStatus)}
+                                                    style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid #E2E8F0', backgroundColor: 'white', fontSize: '13px', minWidth: '130px', cursor: 'pointer' }}
+                                                >
+                                                    <option value="pending">قيد الانتظار</option>
+                                                    <option value="confirmed">مؤكد ✅</option>
+                                                    <option value="rejected">مرفوض ❌</option>
+                                                    <option value="cancelled">ملغي</option>
+                                                </Box>
                                             </Table.Cell>
                                         </MotionRow>
                                     ))
@@ -384,7 +516,6 @@ export default function OnlineBookingsPage() {
                         >
                             <Dialog.Content
                                 dir="rtl"
-                                fontFamily="var(--font-tajawal)"
                                 bg="white"
                                 borderRadius="2xl"
                                 overflow="hidden"
@@ -420,6 +551,86 @@ export default function OnlineBookingsPage() {
                                         إلغاء
                                     </Button>
                                 </Flex>
+                            </Dialog.Content>
+                        </Dialog.Positioner>
+                    </Portal>
+                </Dialog.Root>
+
+                {/* مودال الموعد المتوقع للكشف بعد تأكيد الحجز */}
+                <Dialog.Root open={!!confirmResult} onOpenChange={(e) => !e.open && setConfirmResult(null)}>
+                    <Portal>
+                        <Dialog.Backdrop
+                            bg="blackAlpha.600"
+                            backdropFilter="blur(4px)"
+                            zIndex="1400"
+                            position="fixed"
+                            inset="0"
+                        />
+                        <Dialog.Positioner
+                            zIndex="1401"
+                            position="fixed"
+                            inset="0"
+                            display="flex"
+                            alignItems="center"
+                            justifyContent="center"
+                            padding={4}
+                        >
+                            <Dialog.Content
+                                dir="rtl"
+                                bg="white"
+                                borderRadius="2xl"
+                                overflow="hidden"
+                                boxShadow="2xl"
+                                width={{ base: "90%", md: "400px" }}
+                                p={6}
+                                textAlign="right"
+                            >
+                                <Box color="green.500" mb={4} display="flex" justifyContent="center">
+                                    <CheckCircle2 size={48} />
+                                </Box>
+                                <Heading size="lg" mb={2} color="gray.800">
+                                    تم تأكيد الحجز
+                                </Heading>
+                                {confirmResult && (
+                                    <>
+                                        <Text color="gray.600" mb={3}>
+                                            {confirmResult.customerName}
+                                        </Text>
+                                        <Box
+                                            bg="#6f6a40"
+                                            color="white"
+                                            p={4}
+                                            borderRadius="xl"
+                                            mb={4}
+                                        >
+                                            <Flex align="center" gap={2} mb={2}>
+                                                <Clock size={22} />
+                                                <Text fontWeight="bold" fontSize="lg">
+                                                    الموعد المتوقع للكشف
+                                                </Text>
+                                            </Flex>
+                                            <Text fontSize="2xl" fontWeight="bold" fontFamily="monospace" dir="ltr">
+                                                {formatTime12(confirmResult.expectedExaminationTime)}
+                                            </Text>
+                                        </Box>
+                                        <Flex gap={4} flexWrap="wrap" mb={4} fontSize="sm" color="gray.600">
+                                            <Text>
+                                                ترتيب في الطابور: <strong>{confirmResult.positionInQueue}</strong> من {confirmResult.totalInDay}
+                                            </Text>
+                                            <Text>
+                                                ساعات العمل: <strong dir="ltr">{formatTime12(confirmResult.workingHours.start)}</strong> — <strong dir="ltr">{formatTime12(confirmResult.workingHours.end)}</strong>
+                                            </Text>
+                                        </Flex>
+                                    </>
+                                )}
+                                <Button
+                                    w="full"
+                                    onClick={() => setConfirmResult(null)}
+                                    colorPalette="gray"
+                                    variant="outline"
+                                >
+                                    حسناً
+                                </Button>
                             </Dialog.Content>
                         </Dialog.Positioner>
                     </Portal>

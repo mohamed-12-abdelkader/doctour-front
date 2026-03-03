@@ -153,7 +153,7 @@ export default function AccountsPage() {
     const NotifIcon = notification?.status === 'success' ? CheckCircle : notification?.status === 'error' ? XCircle : notification?.status === 'warning' ? AlertTriangle : Info
 
     return (
-        <Box minH="100vh" bg="#f0f1f3" dir="rtl" fontFamily="var(--font-tajawal)">
+        <Box minH="100vh" bg="#f0f1f3" dir="rtl">
             {/* Header */}
             <Box bg="linear-gradient(135deg, #615b36 0%, #7a7350 50%, #8a8260 100%)" py={8} px={4}>
                 <Container maxW="7xl">
@@ -171,7 +171,7 @@ export default function AccountsPage() {
                                 رجوع
                             </Button>
                             <Box>
-                                <Heading size="xl" color="white" fontFamily="var(--font-tajawal)">
+                                <Heading size="xl" color="white">
                                     إدارة الحسابات
                                 </Heading>
                                 <Text color="whiteAlpha.900" fontSize="sm" mt={1}>
@@ -378,7 +378,7 @@ export default function AccountsPage() {
             <Dialog.Root open={isDialogOpen} onOpenChange={(e) => setIsDialogOpen(e.open)} size="md">
                 <Dialog.Backdrop />
                 <Dialog.Positioner>
-                    <Dialog.Content dir="rtl" fontFamily="var(--font-tajawal)" borderRadius="2xl" overflow="hidden">
+                    <Dialog.Content dir="rtl" borderRadius="2xl" overflow="hidden">
                         <Dialog.Header bg="#fdfbf7" borderBottom="1px solid" borderColor="gray.100" py={4} px={6}>
                             <Dialog.Title fontSize="lg" fontWeight="bold" color="#615b36">
                                 {editingStaff ? 'تعديل موظف' : 'إضافة موظف جديد'}

@@ -24,9 +24,9 @@ export interface AccountSummary {
     clientsCount: number;
 }
 
-// API: GET /accounts/income/bookings?month=YYYY-MM
+// API: GET /accounts/income/bookings — query: month | startDate+endDate | startMonth+endMonth
 export interface BookingsIncomeResponse {
-    month: string;
+    period: string;
     byCustomer: { customerName: string; amount: number }[];
     total: number;
 }
@@ -38,7 +38,7 @@ export interface AddIncomeBody {
     entryDate?: string; // YYYY-MM-DD
 }
 
-// API: GET /accounts/income/manual?month=YYYY-MM
+// API: GET /accounts/income/manual
 export interface ManualIncomeEntry {
     id?: number;
     description: string;
@@ -47,7 +47,7 @@ export interface ManualIncomeEntry {
     createdAt?: string;
 }
 export interface ManualIncomeResponse {
-    month: string;
+    period: string;
     entries: ManualIncomeEntry[];
     total: number;
 }
@@ -60,7 +60,7 @@ export interface AddExpenseBody {
     notes?: string;
 }
 
-// API: GET /accounts/expenses?month=YYYY-MM
+// API: GET /accounts/expenses
 export interface ExpenseEntry {
     id?: number;
     description: string;
@@ -70,14 +70,14 @@ export interface ExpenseEntry {
     createdAt?: string;
 }
 export interface ExpensesResponse {
-    month: string;
+    period: string;
     expenses: ExpenseEntry[];
     total: number;
 }
 
-// API: GET /accounts/summary?month=YYYY-MM
+// API: GET /accounts/summary
 export interface AccountsSummaryResponse {
-    month: string;
+    period: string;
     incomeFromBookings: number;
     manualIncome: number;
     totalIncome: number;

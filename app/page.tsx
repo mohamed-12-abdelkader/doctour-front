@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import HeroSection from "@/components/HeroSection";
 import ServicesSection from "@/components/ServicesSection";
+import BeforeAfterSection from "@/components/BeforeAfterSection";
 import ReviewsSection from "@/components/ReviewsSection";
 import ContactSection from "@/components/ContactSection";
 import Footer from "@/components/Footer";
@@ -45,6 +46,7 @@ export default function Home() {
       <Box pt={0}>
         <HeroSection />
         <ServicesSection />
+        <BeforeAfterSection />
         <ReviewsSection />
         <ContactSection />
       </Box>

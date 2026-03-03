@@ -133,7 +133,6 @@ export default function AdminLoginPage() {
                                 size="xl"
                                 mb={2}
                                 color="#544f30"
-                                fontFamily="var(--font-cairo)"
                             >
                                 Admin Login
                             </Heading>
@@ -266,7 +265,6 @@ export default function AdminLoginPage() {
                                     transform: 'translateY(0)',
                                 }}
                                 transition="all 0.2s"
-                                fontFamily="var(--font-tajawal)"
                             >
                                 Sign In
                             </Button>

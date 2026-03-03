@@ -1,16 +1,9 @@
 'use client'
 
-import { Dialog, Button, Input, Text, VStack, Flex, Box, Portal } from '@chakra-ui/react'
+import { Dialog, Button, Input, Text, VStack, Box, Portal, Flex } from '@chakra-ui/react'
 import { useState, useEffect } from 'react'
 import api from '@/lib/axios'
 import { toaster } from '@/components/ui/toaster'
-
-const VISIT_TYPES = [
-    { value: 'استشارة', label: 'استشارة' },
-    { value: 'كشف', label: 'كشف' },
-    { value: 'إعادة', label: 'إعادة' },
-    { value: 'أخرى', label: 'أخرى' },
-]
 
 interface OnlineBookingModalProps {
     isOpen: boolean
@@ -20,21 +13,12 @@ interface OnlineBookingModalProps {
 export default function OnlineBookingModal({ isOpen, onClose }: OnlineBookingModalProps) {
     const [name, setName] = useState('')
     const [phone, setPhone] = useState('')
-    const [age, setAge] = useState<string>('')
-    const [visitType, setVisitType] = useState('استشارة')
-    const [date, setDate] = useState('')
-    const [time, setTime] = useState('')
     const [saving, setSaving] = useState(false)
 
     useEffect(() => {
         if (isOpen) {
-            const today = new Date()
-            setDate(today.toISOString().split('T')[0])
-            setTime(today.toTimeString().slice(0, 5))
             setName('')
             setPhone('')
-            setAge('')
-            setVisitType('استشارة')
         }
     }, [isOpen])
 
@@ -43,30 +27,21 @@ export default function OnlineBookingModal({ isOpen, onClose }: OnlineBookingMod
             toaster.create({ title: 'أدخل الاسم ورقم الهاتف', type: 'warning', duration: 2000 })
             return
         }
-        const ageNum = parseInt(age, 10)
-        if (isNaN(ageNum) || ageNum < 1 || ageNum > 120) {
-            toaster.create({ title: 'أدخل عمراً صحيحاً', type: 'warning', duration: 2000 })
-            return
-        }
-        if (!date || !time) {
-            toaster.create({ title: 'أدخل التاريخ والوقت', type: 'warning', duration: 2000 })
-            return
-        }
-
-        const dateIso = new Date(`${date}T${time}`).toISOString()
 
         setSaving(true)
         try {
+            // تاريخ اليوم يتبعت تلقائياً كـ preferredDate
+            const todayDate = new Date().toISOString().split('T')[0] // YYYY-MM-DD
+
             await api.post('/bookings/online', {
                 name: name.trim(),
                 phone: phone.trim(),
-                age: ageNum,
-                visitType,
-                date: dateIso,
+                preferredDate: todayDate,
             })
+
             toaster.create({
                 title: 'تم تقديم طلب الحجز بنجاح',
-                description: 'سيتم التواصل معك لتأكيد الموعد',
+                description: 'سيتواصل معك الفريق لتأكيد الموعد',
                 type: 'success',
                 duration: 4000,
             })
@@ -104,155 +79,78 @@ export default function OnlineBookingModal({ isOpen, onClose }: OnlineBookingMod
                 >
                     <Dialog.Content
                         dir="rtl"
-                        fontFamily="var(--font-tajawal)"
                         bg="white"
                         borderRadius="2xl"
                         overflow="hidden"
                         boxShadow="2xl"
-                        width={{ base: '90%', md: '440px' }}
-                        maxH="90vh"
-                        overflowY="auto"
+                        width={{ base: '95%', md: '400px' }}
                         outline="none"
                     >
+                        {/* Header */}
                         <Box
                             bg="#fdfbf7"
-                            px={6}
-                            py={4}
-                            borderBottom="1px solid"
-                            borderColor="#eee"
-                            display="flex"
-                            justifyContent="space-between"
-                            alignItems="center"
+                            px={6} py={4}
+                            borderBottom="1px solid" borderColor="#eee"
+                            display="flex" justifyContent="space-between" alignItems="center"
                         >
                             <Text fontSize="xl" color="#615b36" fontWeight="bold">
                                 حجز موعد أونلاين
                             </Text>
                             <Dialog.CloseTrigger asChild>
                                 <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    color="gray.500"
+                                    size="sm" variant="ghost" color="gray.500"
                                     _hover={{ bg: 'blackAlpha.50', color: 'red.500' }}
-                                    rounded="full"
-                                    w={8}
-                                    h={8}
-                                    minW={0}
-                                    p={0}
-                                >
-                                    ✕
-                                </Button>
+                                    rounded="full" w={8} h={8} minW={0} p={0}
+                                >✕</Button>
                             </Dialog.CloseTrigger>
                         </Box>
 
                         <Box p={6}>
                             <VStack gap={4} align="stretch">
+
+                                {/* Name */}
                                 <Box>
                                     <Text fontSize="sm" color="gray.600" mb={2}>
-                                        الاسم
+                                        الاسم الكامل <Text as="span" color="red.400">*</Text>
                                     </Text>
                                     <Input
-                                        placeholder="الاسم الكامل"
+                                        placeholder="محمد أحمد"
                                         value={name}
                                         onChange={(e) => setName(e.target.value)}
-                                        bg="gray.50"
-                                        borderColor="gray.200"
+                                        bg="gray.50" borderColor="gray.200"
                                         _focus={{ borderColor: '#615b36', bg: 'white' }}
+                                        onKeyDown={(e) => e.key === 'Enter' && handleSave()}
                                     />
                                 </Box>
 
+                                {/* Phone */}
                                 <Box>
                                     <Text fontSize="sm" color="gray.600" mb={2}>
-                                        رقم الهاتف
+                                        رقم الهاتف <Text as="span" color="red.400">*</Text>
                                     </Text>
                                     <Input
                                         placeholder="01xxxxxxxxx"
                                         value={phone}
                                         onChange={(e) => setPhone(e.target.value)}
-                                        dir="ltr"
-                                        textAlign="left"
-                                        bg="gray.50"
-                                        borderColor="gray.200"
+                                        dir="ltr" textAlign="left"
+                                        bg="gray.50" borderColor="gray.200"
                                         _focus={{ borderColor: '#615b36', bg: 'white' }}
+                                        onKeyDown={(e) => e.key === 'Enter' && handleSave()}
                                     />
-                                </Box>
-
-                                <Box>
-                                    <Text fontSize="sm" color="gray.600" mb={2}>
-                                        العمر
+                                    <Text fontSize="xs" color="gray.400" mt={1}>
+                                        رقم مصري: 010 / 011 / 012 / 015
                                     </Text>
-                                    <Input
-                                        type="number"
-                                        placeholder="مثال: 35"
-                                        value={age}
-                                        onChange={(e) => setAge(e.target.value)}
-                                        min={1}
-                                        max={120}
-                                        bg="gray.50"
-                                        borderColor="gray.200"
-                                        _focus={{ borderColor: '#615b36', bg: 'white' }}
-                                    />
                                 </Box>
 
-                                <Box>
-                                    <Text fontSize="sm" color="gray.600" mb={2}>
-                                        نوع الزيارة
-                                    </Text>
-                                    <Box
-                                        as="select"
-                                        value={visitType}
-                                        onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setVisitType(e.target.value)}
-                                        w="full"
-                                        p={2}
-                                        borderRadius="md"
-                                        border="1px solid"
-                                        borderColor="gray.200"
-                                        bg="gray.50"
-                                        _focus={{ borderColor: '#615b36', bg: 'white', outline: 'none' }}
-                                        fontFamily="var(--font-tajawal)"
-                                    >
-                                        {VISIT_TYPES.map((opt) => (
-                                            <option key={opt.value} value={opt.value}>
-                                                {opt.label}
-                                            </option>
-                                        ))}
-                                    </Box>
-                                </Box>
-
-                                <Box>
-                                    <Text fontSize="sm" color="gray.600" mb={2}>
-                                        التاريخ والوقت
-                                    </Text>
-                                    <Flex gap={2}>
-                                        <Input
-                                            type="date"
-                                            value={date}
-                                            onChange={(e) => setDate(e.target.value)}
-                                            bg="gray.50"
-                                            borderColor="gray.200"
-                                            flex={1}
-                                            _focus={{ borderColor: '#615b36', bg: 'white' }}
-                                        />
-                                        <Input
-                                            type="time"
-                                            value={time}
-                                            onChange={(e) => setTime(e.target.value)}
-                                            bg="gray.50"
-                                            borderColor="gray.200"
-                                            flex={1}
-                                            _focus={{ borderColor: '#615b36', bg: 'white' }}
-                                        />
-                                    </Flex>
-                                </Box>
-
-                                <Flex gap={3} mt={4} w="full">
+                                {/* Actions */}
+                                <Flex gap={3} mt={2}>
                                     <Button
                                         flex={1}
                                         onClick={handleSave}
-                                        bg="#615b36"
-                                        color="white"
+                                        bg="#615b36" color="white"
                                         _hover={{ bg: '#4a452a' }}
                                         loading={saving}
-                                        disabled={!name.trim() || !phone.trim() || !age || !date || !time}
+                                        disabled={!name.trim() || !phone.trim()}
                                     >
                                         إرسال طلب الحجز
                                     </Button>
@@ -260,6 +158,7 @@ export default function OnlineBookingModal({ isOpen, onClose }: OnlineBookingMod
                                         إلغاء
                                     </Button>
                                 </Flex>
+
                             </VStack>
                         </Box>
                     </Dialog.Content>

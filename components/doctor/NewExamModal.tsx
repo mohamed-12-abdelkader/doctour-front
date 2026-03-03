@@ -48,7 +48,7 @@ export default function NewExamModal({ isOpen, onClose, onSave, patientName }: N
         <Dialog.Root open={isOpen} onOpenChange={(e) => !e.open && onClose()} size="xl" scrollBehavior="inside">
             <Dialog.Backdrop />
             <Dialog.Positioner>
-                <Dialog.Content dir="rtl" fontFamily="var(--font-tajawal)">
+                <Dialog.Content dir="rtl">
                     <Dialog.CloseTrigger />
                     <Dialog.Header>كشف جديد: {patientName}</Dialog.Header>
                     <Dialog.Body>

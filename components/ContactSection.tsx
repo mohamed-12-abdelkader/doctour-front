@@ -1,116 +1,169 @@
 'use client'
 
-import {
-    Box,
-    Heading,
-    Stack,
-    Text,
-    Container,
-    Input,
-    Textarea,
-    Button
-} from '@chakra-ui/react'
+import { Box, Flex, Heading, Stack, Text, Container, Button, Link } from '@chakra-ui/react'
 import { doctorInfo } from '@/data/services'
 
+const BRAND = '#5d562c'
+
 export default function ContactSection() {
-    return (
-        <Box id="contact" bg="gray.100" borderRadius="lg" m={{ base: 5, md: 16, lg: 10 }} p={{ base: 5, lg: 16 }} dir="rtl">
-            <Container maxW="7xl">
-                <Box display={{ md: 'flex' }} gap={10}>
-                    <Box flex={1} bg="#615b36" borderRadius="2xl" p={{ base: 8, md: 10 }} color="white" mb={{ base: 10, md: 0 }} boxShadow="xl" position="relative" overflow="hidden">
-                        {/* Decorative Circle */}
-                        <Box position="absolute" top={-10} right={-10} w={40} h={40} bg="whiteAlpha.100" rounded="full" blur="2xl" />
-                        <Box position="absolute" bottom={-10} left={-10} w={40} h={40} bg="whiteAlpha.100" rounded="full" blur="2xl" />
-                        <Heading mb={6}>تواصل معنا</Heading>
-                        <Text mb={8} fontSize="lg">
-                            نسعد باستقبال استفساراتكم وحجز مواعيدكم في عيادات دكتورة ريم عاطف.
-                        </Text>
+  return (
+    <Box
+      id="contact"
+      bg="linear-gradient(to bottom, #FAFAF9 0%, #F5F5F0 100%)"
+      py={20}
+      px={{ base: 4, md: 6 }}
+      dir="rtl"
+      fontFamily="var(--font-tajawal), Tajawal, sans-serif"
+    >
+      <Container maxW="7xl">
+        <Box
+          maxW="2xl"
+          mx="auto"
+          bg="white"
+          borderRadius="2xl"
+          p={{ base: 8, md: 14 }}
+          boxShadow="0 20px 50px -15px rgba(93, 86, 44, 0.12)"
+          borderWidth="1px"
+          borderColor="rgba(93, 86, 44, 0.1)"
+          position="relative"
+          overflow="hidden"
+        >
+          {/* زخرفة خفيفة */}
+          <Box
+            position="absolute"
+            top={0}
+            right={0}
+            w="200px"
+            h="200px"
+            bg={BRAND}
+            opacity={0.04}
+            borderRadius="full"
+            transform="translate(30%, -30%)"
+          />
 
-                        <Stack gap={6}>
-                            {doctorInfo.locations.map((loc, i) => (
-                                <Box key={i}>
-                                    <Heading size="md" mb={2} display="flex" alignItems="center">📍 الفرع {i + 1}</Heading>
-                                    <Text>{loc}</Text>
-                                </Box>
-                            ))}
+          <Flex align="center" justify="center" gap={2} mb={4}>
+            <Box h="1px" w="40px" bg={BRAND} />
+            <Text color={BRAND} fontWeight="bold" fontSize="sm" letterSpacing="wider">
+              العيادة
+            </Text>
+            <Box h="1px" w="40px" bg={BRAND} />
+          </Flex>
 
-                            <Box>
-                                <Heading size="md" mb={2}>📞 الهاتف</Heading>
-                                <Text>01xxxxxxxxx (رقم الهاتف)</Text>
-                            </Box>
+          <Heading
+            fontSize={{ base: '2xl', md: '3xl' }}
+            fontWeight="800"
+            color={BRAND}
+            mb={4}
+            textAlign="center"
+            fontFamily="var(--font-tajawal), Tajawal, sans-serif"
+          >
+            تواصل معنا
+          </Heading>
 
-                            <Box>
-                                <Heading size="md" mb={2}>📧 البريد الإلكتروني</Heading>
-                                <Text>contact@dr-reematef.com</Text>
-                            </Box>
-                        </Stack>
-                    </Box>
+          <Text
+            textAlign="center"
+            color="gray.600"
+            fontSize="lg"
+            mb={10}
+            fontFamily="var(--font-tajawal), Tajawal, sans-serif"
+          >
+            نسعد باستقبال استفساراتكم وحجز مواعيدكم في عيادات دكتورة ريم عاطف.
+          </Text>
 
-                    <Box flex={1} bg="white" borderRadius="2xl" p={{ base: 6, md: 10 }} boxShadow="xl" border="1px solid" borderColor="gray.100">
-                        <form onSubmit={(e: React.FormEvent) => { e.preventDefault(); alert("شكراً لتواصلك معنا! سيتم الرد قريباً."); }}>
-                            <Stack gap={6}>
-                                <Box>
-                                    <Text mb={2} fontWeight="bold" fontSize="sm" color="gray.700">الاسم</Text>
-                                    <Input
-                                        placeholder="الاسم ثلاثي"
-                                        size="lg"
-                                        bg="gray.50"
-                                        borderRadius="xl"
-                                        border="1px solid"
-                                        borderColor="gray.200"
-                                        _focus={{ borderColor: "#615b36", ring: "2px", ringColor: "#615b36" }}
-                                        required
-                                    />
-                                </Box>
+          <Stack gap={5} mb={10}>
+            {doctorInfo.locations.map((loc, i) => {
+              const mapUrl = doctorInfo.locationMapUrls?.[i]
+              const box = (
+                <Flex
+                  align="flex-start"
+                  gap={3}
+                  p={4}
+                  borderRadius="xl"
+                  bg="gray.50"
+                  borderWidth="1px"
+                  borderColor="gray.100"
+                  _hover={mapUrl ? { bg: 'gray.100', borderColor: BRAND } : undefined}
+                  cursor={mapUrl ? 'pointer' : undefined}
+                  transition="all 0.2s"
+                >
+                  <Box
+                    flexShrink={0}
+                    w="8px"
+                    h="8px"
+                    borderRadius="full"
+                    bg={BRAND}
+                    mt="6px"
+                  />
+                  <Box>
+                    <Text
+                      fontWeight="700"
+                      color={BRAND}
+                      fontSize="sm"
+                      mb={1}
+                      fontFamily="var(--font-tajawal), Tajawal, sans-serif"
+                    >
+                      الفرع {i + 1}
+                    </Text>
+                    <Text
+                      color="gray.700"
+                      fontSize="md"
+                      lineHeight="1.6"
+                      fontFamily="var(--font-tajawal), Tajawal, sans-serif"
+                    >
+                      {loc}
+                    </Text>
+                    {mapUrl && (
+                      <Text fontSize="xs" color={BRAND} mt={1}>
+                        انقر لفتح الموقع على الخريطة ↗
+                      </Text>
+                    )}
+                  </Box>
+                </Flex>
+              )
+              if (mapUrl) {
+                return (
+                  <Link
+                    key={i}
+                    href={mapUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    _hover={{ textDecoration: 'none' }}
+                  >
+                    {box}
+                  </Link>
+                )
+              }
+              return <Box key={i}>{box}</Box>
+            })}
+          </Stack>
 
-                                <Box>
-                                    <Text mb={2} fontWeight="bold" fontSize="sm" color="gray.700">رقم الهاتف</Text>
-                                    <Input
-                                        type="tel"
-                                        placeholder="01xxxxxxxxx"
-                                        size="lg"
-                                        bg="gray.50"
-                                        borderRadius="xl"
-                                        border="1px solid"
-                                        borderColor="gray.200"
-                                        _focus={{ borderColor: "#615b36", ring: "2px", ringColor: "#615b36" }}
-                                        required
-                                    />
-                                </Box>
-
-                                <Box>
-                                    <Text mb={2} fontWeight="bold" fontSize="sm" color="gray.700">الرسالة</Text>
-                                    <Textarea
-                                        placeholder="كيف يمكننا مساعدتك؟"
-                                        rows={5}
-                                        size="lg"
-                                        bg="gray.50"
-                                        borderRadius="xl"
-                                        border="1px solid"
-                                        borderColor="gray.200"
-                                        _focus={{ borderColor: "#615b36", ring: "2px", ringColor: "#615b36" }}
-                                        resize="none"
-                                    />
-                                </Box>
-
-                                <Button
-                                    type="submit"
-                                    size="lg"
-                                    w="full"
-                                    bg="#615b36"
-                                    color="white"
-                                    borderRadius="xl"
-                                    fontSize="lg"
-                                    _hover={{ bg: "#4a4529", transform: "translateY(-2px)", boxShadow: "lg" }}
-                                    transition="all 0.3s"
-                                >
-                                    إرسال الرسالة
-                                </Button>
-                            </Stack>
-                        </form>
-                    </Box>
-                </Box>
-            </Container>
+          <Box textAlign="center">
+            <Button
+              as="a"
+              href={doctorInfo.whatsappUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              size="lg"
+              bg={BRAND}
+              color="white"
+              px={10}
+              py={6}
+              borderRadius="xl"
+              fontSize="lg"
+              fontWeight="bold"
+              fontFamily="var(--font-tajawal), Tajawal, sans-serif"
+              _hover={{
+                bg: '#4a4528',
+                transform: 'translateY(-2px)',
+                boxShadow: 'xl',
+              }}
+              transition="all 0.3s"
+            >
+              تواصل واتساب
+            </Button>
+          </Box>
         </Box>
-    )
+      </Container>
+    </Box>
+  )
 }

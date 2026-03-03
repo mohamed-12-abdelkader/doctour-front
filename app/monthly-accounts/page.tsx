@@ -2,9 +2,9 @@
 
 import {
     Box, Container, Flex, Heading, Text, Button, Input, SimpleGrid, Card, Stack,
-    Dialog, useDisclosure, Spinner, Table, HStack, Field, Textarea
+    Dialog, useDisclosure, Spinner, Table, HStack, Field, Textarea, Tabs
 } from '@chakra-ui/react'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Plus, Calendar, Wallet, TrendingUp, TrendingDown, DollarSign, FileText, Receipt } from 'lucide-react'
 import {
     BookingsIncomeResponse,
@@ -21,9 +21,40 @@ function getCurrentMonth(): string {
     const d = new Date()
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
+function getToday(): string {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+/** تنسيق تاريخ مع اسم اليوم: "السبت 1 فبراير 2026" */
+function formatDateWithDay(dateStr: string): string {
+    if (!dateStr) return ''
+    try {
+        return new Date(dateStr + 'T12:00:00').toLocaleDateString('ar-EG', {
+            weekday: 'long',
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric',
+        })
+    } catch {
+        return dateStr
+    }
+}
+
+type PeriodMode = 'month' | 'days' | 'months'
 
 export default function MonthlyAccountsPage() {
+    const [periodMode, setPeriodMode] = useState<PeriodMode>('month')
     const [month, setMonth] = useState<string>(getCurrentMonth())
+    const [startDate, setStartDate] = useState<string>(() => {
+        const d = new Date()
+        d.setDate(1)
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    })
+    const [endDate, setEndDate] = useState<string>(getToday())
+    const [startMonth, setStartMonth] = useState<string>(getCurrentMonth())
+    const [endMonth, setEndMonth] = useState<string>(getCurrentMonth())
+
     const [summary, setSummary] = useState<AccountsSummaryResponse | null>(null)
     const [bookingsIncome, setBookingsIncome] = useState<BookingsIncomeResponse | null>(null)
     const [manualIncome, setManualIncome] = useState<ManualIncomeResponse | null>(null)
@@ -47,16 +78,22 @@ export default function MonthlyAccountsPage() {
         notes: '',
     })
 
+    /** معاملات الفترة حسب الـ doc: شهر واحد | startDate+endDate | startMonth+endMonth. عدم الإرسال = الشهر الحالي */
+    const periodParams = useMemo(() => {
+        if (periodMode === 'month') return month ? { month } : {}
+        if (periodMode === 'days') return startDate && endDate ? { startDate, endDate } : {}
+        if (periodMode === 'months') return startMonth && endMonth ? { startMonth, endMonth } : {}
+        return {}
+    }, [periodMode, month, startDate, endDate, startMonth, endMonth])
+
     const fetchAll = async () => {
-        if (!month) return
         setIsLoading(true)
         try {
-            const params = { month }
             const [summaryRes, bookingsRes, manualRes, expensesRes] = await Promise.all([
-                api.get<AccountsSummaryResponse>('/accounts/summary', { params }),
-                api.get<BookingsIncomeResponse>('/accounts/income/bookings', { params }),
-                api.get<ManualIncomeResponse>('/accounts/income/manual', { params }),
-                api.get<ExpensesResponse>('/accounts/expenses', { params }),
+                api.get<AccountsSummaryResponse>('/accounts/summary', { params: periodParams }),
+                api.get<BookingsIncomeResponse>('/accounts/income/bookings', { params: periodParams }),
+                api.get<ManualIncomeResponse>('/accounts/income/manual', { params: periodParams }),
+                api.get<ExpensesResponse>('/accounts/expenses', { params: periodParams }),
             ])
             setSummary(summaryRes.data)
             setBookingsIncome(bookingsRes.data)
@@ -76,7 +113,7 @@ export default function MonthlyAccountsPage() {
 
     useEffect(() => {
         fetchAll()
-    }, [month])
+    }, [periodMode, month, startDate, endDate, startMonth, endMonth])
 
     const handleAddIncome = async () => {
         if (!incomeForm.description?.trim() || incomeForm.amount <= 0) {
@@ -138,38 +175,81 @@ export default function MonthlyAccountsPage() {
     const formatAmount = (n: number | string | null | undefined) => (typeof n === 'number' ? n : parseFloat(String(n ?? 0)) || 0).toFixed(2)
     const formatDate = (d: string) => new Date(d).toLocaleDateString('ar-EG', { year: 'numeric', month: 'short', day: 'numeric' })
 
-    const monthLabel = month
-        ? new Date(month + '-01').toLocaleDateString('ar-EG', { month: 'long', year: 'numeric' })
-        : '—'
+    const periodLabel = (() => {
+        if (periodMode === 'days' && startDate && endDate)
+            return `${formatDateWithDay(startDate)} — ${formatDateWithDay(endDate)}`
+        if (summary?.period && periodMode !== 'days') return summary.period
+        if (periodMode === 'month' && month)
+            return new Date(month + '-01').toLocaleDateString('ar-EG', { month: 'long', year: 'numeric' })
+        if (periodMode === 'months' && startMonth && endMonth)
+            return `${new Date(startMonth + '-01').toLocaleDateString('ar-EG', { month: 'long', year: 'numeric' })} — ${new Date(endMonth + '-01').toLocaleDateString('ar-EG', { month: 'long', year: 'numeric' })}`
+        return summary?.period ?? 'الفترة'
+    })()
 
     return (
-        <Box minH="100vh" bg="#f0f1f3" dir="rtl" fontFamily="var(--font-tajawal)">
+        <Box minH="100vh" bg="#f0f1f3" dir="rtl">
             {/* Header */}
             <Box bg="linear-gradient(135deg, #615b36 0%, #7a7350 50%, #8a8260 100%)" py={8} px={4}>
                 <Container maxW="6xl">
                     <Flex justify="space-between" align="center" flexWrap="wrap" gap={4}>
                         <Box>
-                            <Heading size="xl" color="white" mb={1} fontFamily="var(--font-tajawal)">
+                            <Heading size="xl" color="white" mb={1}>
                                 الحسابات الشهرية
                             </Heading>
                             <Flex align="center" gap={2} color="whiteAlpha.900" fontSize="md">
                                 <Calendar size={18} />
-                                <Text>تقرير شهر {monthLabel}</Text>
+                                <Text>الفترة: {periodLabel}</Text>
                             </Flex>
                         </Box>
-                        <HStack gap={3}>
-                            <Input
-                                type="month"
-                                value={month}
-                                onChange={(e) => setMonth(e.target.value)}
-                                bg="whiteAlpha.200"
-                                border="1px solid"
-                                borderColor="whiteAlpha.300"
-                                color="white"
-                                maxW="180px"
-                                _placeholder={{ color: 'whiteAlpha.700' }}
-                            />
-                        </HStack>
+                        <Box bg="whiteAlpha.100" borderRadius="xl" p={3}>
+                            <Tabs.Root value={periodMode} onValueChange={(e) => setPeriodMode(e.value as PeriodMode)} size="sm">
+                                <Tabs.List gap={1} flexWrap="wrap">
+                                    <Tabs.Trigger value="month">شهر واحد</Tabs.Trigger>
+                                    <Tabs.Trigger value="days">نطاق أيام</Tabs.Trigger>
+                                    <Tabs.Trigger value="months">نطاق شهور</Tabs.Trigger>
+                                </Tabs.List>
+                                <Box mt={3} display="flex" flexWrap="wrap" gap={3} alignItems="center">
+                                    {periodMode === 'month' && (
+                                        <HStack>
+                                            <Text color="whiteAlpha.900" fontSize="sm">الشهر</Text>
+                                            <Input
+                                                type="month"
+                                                value={month}
+                                                onChange={(e) => setMonth(e.target.value)}
+                                                bg="white"
+                                                color="gray.800"
+                                                maxW="160px"
+                                                size="sm"
+                                            />
+                                        </HStack>
+                                    )}
+                                    {periodMode === 'days' && (
+                                        <HStack gap={2} flexWrap="wrap">
+                                            <HStack>
+                                                <Text color="whiteAlpha.900" fontSize="sm">من</Text>
+                                                <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} bg="white" color="gray.800" maxW="150px" size="sm" />
+                                            </HStack>
+                                            <HStack>
+                                                <Text color="whiteAlpha.900" fontSize="sm">إلى</Text>
+                                                <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} bg="white" color="gray.800" maxW="150px" size="sm" />
+                                            </HStack>
+                                        </HStack>
+                                    )}
+                                    {periodMode === 'months' && (
+                                        <HStack gap={2} flexWrap="wrap">
+                                            <HStack>
+                                                <Text color="whiteAlpha.900" fontSize="sm">من شهر</Text>
+                                                <Input type="month" value={startMonth} onChange={(e) => setStartMonth(e.target.value)} bg="white" color="gray.800" maxW="150px" size="sm" />
+                                            </HStack>
+                                            <HStack>
+                                                <Text color="whiteAlpha.900" fontSize="sm">إلى شهر</Text>
+                                                <Input type="month" value={endMonth} onChange={(e) => setEndMonth(e.target.value)} bg="white" color="gray.800" maxW="150px" size="sm" />
+                                            </HStack>
+                                        </HStack>
+                                    )}
+                                </Box>
+                            </Tabs.Root>
+                        </Box>
                     </Flex>
                 </Container>
             </Box>
@@ -282,7 +362,7 @@ export default function MonthlyAccountsPage() {
                                     ) : (
                                         <Box py={10} textAlign="center">
                                             <Receipt size={40} color="#e2e8f0" style={{ margin: '0 auto 8px' }} />
-                                            <Text color="gray.500" fontSize="sm">لا يوجد دخل حجوزات لهذا الشهر</Text>
+                                            <Text color="gray.500" fontSize="sm">لا يوجد دخل حجوزات للفترة المحددة</Text>
                                         </Box>
                                     )}
                                 </Card.Body>
@@ -332,7 +412,7 @@ export default function MonthlyAccountsPage() {
                                     ) : (
                                         <Box py={10} textAlign="center">
                                             <DollarSign size={40} color="#e2e8f0" style={{ margin: '0 auto 8px' }} />
-                                            <Text color="gray.500" fontSize="sm">لا توجد إدخالات دخل يدوي</Text>
+                                            <Text color="gray.500" fontSize="sm">لا توجد إدخالات دخل يدوي للفترة المحددة</Text>
                                             <Button size="sm" mt={3} variant="outline" colorScheme="green" onClick={onIncomeOpen}>
                                                 إضافة دخل يدوي
                                             </Button>
@@ -387,7 +467,7 @@ export default function MonthlyAccountsPage() {
                                     ) : (
                                         <Box py={10} textAlign="center">
                                             <FileText size={40} color="#e2e8f0" style={{ margin: '0 auto 8px' }} />
-                                            <Text color="gray.500" fontSize="sm">لا توجد مصروفات مسجلة</Text>
+                                            <Text color="gray.500" fontSize="sm">لا توجد مصروفات للفترة المحددة</Text>
                                             <Button size="sm" mt={3} variant="outline" colorScheme="red" onClick={onExpenseOpen}>
                                                 إضافة مصروف
                                             </Button>
@@ -404,7 +484,7 @@ export default function MonthlyAccountsPage() {
             <Dialog.Root open={isIncomeOpen} onOpenChange={(e) => !e.open && onIncomeClose()} size="md">
                 <Dialog.Backdrop />
                 <Dialog.Positioner>
-                    <Dialog.Content dir="rtl" fontFamily="var(--font-tajawal)">
+                    <Dialog.Content dir="rtl">
                         <Dialog.CloseTrigger />
                         <Dialog.Header fontSize="lg" fontWeight="bold">إضافة دخل يدوي</Dialog.Header>
                         <Dialog.Body>
@@ -450,7 +530,7 @@ export default function MonthlyAccountsPage() {
             <Dialog.Root open={isExpenseOpen} onOpenChange={(e) => !e.open && onExpenseClose()} size="md">
                 <Dialog.Backdrop />
                 <Dialog.Positioner>
-                    <Dialog.Content dir="rtl" fontFamily="var(--font-tajawal)">
+                    <Dialog.Content dir="rtl">
                         <Dialog.CloseTrigger />
                         <Dialog.Header fontSize="lg" fontWeight="bold">إضافة مصروف</Dialog.Header>
                         <Dialog.Body>

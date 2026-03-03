@@ -1,43 +1,60 @@
 export type BookingType = 'online' | 'clinic';
 export type BookingStatus = 'pending' | 'confirmed' | 'cancelled' | 'rejected';
-export type VisitType = 'checkup' | 'followup';
+export type VisitType = 'checkup' | 'followup' | 'consultation';
 export type ExaminationStatus = 'waiting' | 'done';
 
 export interface Booking {
     id: number;
     customerName: string;
     customerPhone: string;
-    appointmentDate: string; // ISO 8601 format
+    /** null للحجوزات الأونلاين المعلقة */
+    appointmentDate: string | null;
     bookingType: BookingType;
-    amountPaid: string | number; // API returns string, but we can work with both
+    amountPaid: string | number;
     status: BookingStatus;
-    visitType?: VisitType; // كشف أو إعادة
-    examinationStatus?: ExaminationStatus; // حالة الكشف: انتظار | تم (Admin only)
-    /** تقرير المريض — API يرجع الحقل باسم PatientReport */
+    visitType?: VisitType;
+    examinationStatus?: ExaminationStatus;
+    /** الأونلاين فقط: التاريخ المفضل */
+    preferredDate?: string | null;
+    /** الأونلاين فقط: الوقت المفضل */
+    preferredTime?: string | null;
+    /** الـ API الجديد بيرجع reports[] — مصفوفة تقارير */
+    reports?: PatientReport[];
+    /** backward compat مع الـ API القديم */
     report?: PatientReport | null;
     PatientReport?: PatientReport | null;
     createdAt: string;
     updatedAt: string;
 }
 
-// For creating/updating bookings
+// ─── Clinic booking creation ──────────────────────────────────────────────────
 export interface CreateClinicBookingData {
     name: string;
     phone: string;
-    date: string; // ISO 8601 format
-    amountPaid?: number;
-    visitType: VisitType; // كشف أو إعادة
-}
-
-export interface UpdateBookingData {
-    name?: string;
-    phone?: string;
-    date?: string; // ISO 8601 format
+    date: string;        // YYYY-MM-DD (الـ API بيتوقع date مش dateTime)
     amountPaid?: number;
     visitType?: VisitType;
 }
 
-// Patient History Types
+// ─── Clinic booking update ────────────────────────────────────────────────────
+export interface UpdateBookingData {
+    name?: string;
+    phone?: string;
+    date?: string;        // YYYY-MM-DD
+    amountPaid?: number;
+    visitType?: VisitType;
+}
+
+// ─── Online booking creation (Public) ────────────────────────────────────────
+export interface CreateOnlineBookingData {
+    name: string;
+    phone: string;
+    preferredDate?: string;   // YYYY-MM-DD
+    preferredTime?: string;   // HH:MM
+    visitType?: VisitType;
+}
+
+// ─── Patient History ──────────────────────────────────────────────────────────
 export interface LastVisit {
     date: string;
     visitType: VisitType;
@@ -52,7 +69,7 @@ export interface PatientHistory {
     pastBookings: Booking[];
 }
 
-// Patient Report (تقرير المريض) — Admin only — يطابق استجابة API
+// ─── Patient Report ───────────────────────────────────────────────────────────
 export interface Medication {
     id?: number;
     reportId?: number;
@@ -69,13 +86,15 @@ export interface PatientReport {
     bookingId?: number;
     medicalCondition: string;
     notes?: string | null;
+    prescriptionImageUrl?: string | null;
+    prescriptionPublicId?: string | null;
     medications: Medication[];
     createdAt?: string;
     updatedAt?: string;
 }
 
 export interface BookingHistoryResponse {
-    currentBooking: Booking;
+    currentBooking: Booking;   // has .reports[]
     patientHistory: PatientHistory;
 }
 
@@ -84,4 +103,100 @@ export interface CreateReportData {
     medicalCondition: string;
     notes?: string;
     medications: Medication[];
+}
+
+// ─── Notifications ────────────────────────────────────────────────────────────
+export type NotificationType =
+    | 'new_online_booking'
+    | 'booking_confirmed'
+    | 'booking_rejected'
+    | 'booking_cancelled';
+
+export interface NotificationData {
+    bookingId?: number;
+    patientName?: string;
+    patientPhone?: string;
+    preferredDate?: string;
+    preferredTime?: string;
+    [key: string]: any;
+}
+
+export interface Notification {
+    id: number;
+    type: NotificationType;
+    title: string;
+    message: string;
+    data?: NotificationData;
+    isRead: boolean;
+    targetRole?: string;
+    createdAt: string;
+}
+
+export interface NotificationsResponse {
+    total: number;
+    unreadCount: number;
+    page: number;
+    notifications: Notification[];
+}
+
+// ─── Slot-Based System (legacy) ───────────────────────────────────────────────
+export interface WorkingDay {
+    id: number;
+    date: string;        // YYYY-MM-DD
+    startTime: string;   // e.g. "10:00"
+    endTime: string;     // e.g. "18:00"
+    isActive: boolean;
+    createdBy?: number;
+    createdAt?: string;
+    updatedAt?: string;
+}
+
+export interface Patient {
+    id: number;
+    name: string;
+    phone: string;
+    email?: string;
+    createdAt?: string;
+    updatedAt?: string;
+}
+
+export interface SlotInfo {
+    timeSlot: string;
+    count: number;
+    available: boolean;
+}
+
+export interface AvailableSlotsResponse {
+    available: boolean;
+    date?: string;
+    workingHours?: { start: string; end: string };
+    slots?: SlotInfo[];
+    availableSlots?: string[];
+    message?: string;
+}
+
+export interface SlotBooking {
+    id: number;
+    patientId: number;
+    slotDate: string;
+    timeSlot: string;
+    bookingType: BookingType;
+    status: BookingStatus;
+    customerName?: string;
+    customerPhone?: string;
+    createdAt: string;
+    updatedAt?: string;
+}
+
+export interface CreateSlotBookingData {
+    patientId: number;
+    date: string;
+    timeSlot: string;
+    bookingType?: 'online' | 'clinic';
+}
+
+export interface UpsertPatientData {
+    phone: string;
+    name?: string;
+    email?: string;
 }

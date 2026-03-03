@@ -43,6 +43,8 @@ import {
   Users,
   DollarSign,
   CalendarDays,
+  ChevronRight,
+  ChevronLeft,
 } from "lucide-react";
 import api from "@/lib/axios";
 
@@ -54,38 +56,128 @@ export default function TodayBookings() {
   const [filterStatus, setFilterStatus] = useState<"all" | BookingStatus>(
     "all"
   );
-  const [selectedDate, setSelectedDate] = useState<string>(
-    new Date().toISOString().split("T")[0]
-  );
+  const todayStr = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
+  const [rangeStart, setRangeStart] = useState<string>(todayStr);
+  const [rangeEnd, setRangeEnd] = useState<string>(todayStr);
+  // For calendar navigation
+  const [calViewDate, setCalViewDate] = useState<Date>(() => {
+    const d = new Date(); d.setDate(1); return d;
+  });
+  const [pickingEnd, setPickingEnd] = useState(false);
+  const [hoverDate, setHoverDate] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingBooking, setEditingBooking] = useState<Booking | null>(null);
 
-  const fetchBookings = async () => {
-    setIsLoading(true);
+  const fetchBookings = async (silent = false) => {
+    if (!silent) setIsLoading(true);
     try {
       const params: any = {};
+
+      // نوع الحجز
       if (filterType !== "all") params.type = filterType;
+
+      // الحالة — بس لو محددة صريح (الـ API بيحط confirmed تلقائياً لما في تاريخ)
       if (filterStatus !== "all") params.status = filterStatus;
-      if (selectedDate) params.date = selectedDate;
+
+      // قواعد الأولوية حسب الـ doc:
+      if (rangeStart === rangeEnd) {
+        // يوم واحد → params.date فقط (الـ API بيتجاهل startDate/endDate)
+        params.date = rangeStart;
+      } else {
+        // نطاق → startDate + endDate
+        params.startDate = rangeStart;
+        params.endDate = rangeEnd;
+      }
+
       const response = await api.get("/bookings/all", { params });
-      setBookings(response.data);
+
+      // الـ API الجديد بيرجع { total, bookings } أو مصفوفة مباشرة (backward compat)
+      const data = response.data;
+      setBookings(Array.isArray(data) ? data : (data.bookings ?? []));
     } catch (error: any) {
-      toaster.create({
-        title: "خطأ في جلب البيانات",
-        description:
-          error.response?.data?.message || "حدث خطأ أثناء جلب الحجوزات",
-        type: "error",
-        duration: 3000,
-      });
+      if (!silent) {
+        toaster.create({
+          title: "خطأ في جلب البيانات",
+          description: error.response?.data?.message || "حدث خطأ أثناء جلب الحجوزات",
+          type: "error",
+          duration: 3000,
+        });
+      }
     } finally {
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
     }
   };
 
+  // جلب أولي وعند تغيير الفلاتر/التاريخ
   useEffect(() => {
     fetchBookings();
-  }, [filterType, filterStatus, selectedDate]);
+  }, [filterType, filterStatus, rangeStart, rangeEnd]);
+
+  // ريل تايم: تحديث تلقائي كل 5 ثوانٍ لظهور تغييرات حالة الكشف دون ريفرش
+  useEffect(() => {
+    const POLL_INTERVAL_MS = 5000;
+    const id = setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        fetchBookings(true);
+      }
+    }, POLL_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [filterType, filterStatus, rangeStart, rangeEnd]);
+
+  // Calendar helpers
+  const calYear = calViewDate.getFullYear();
+  const calMonth = calViewDate.getMonth();
+  const prevCalMonth = () => setCalViewDate(d => new Date(d.getFullYear(), d.getMonth() - 1, 1));
+  const nextCalMonth = () => setCalViewDate(d => new Date(d.getFullYear(), d.getMonth() + 1, 1));
+
+  // Build calendar grid (Sat-first)
+  const calendarDays = useMemo(() => {
+    const firstDay = new Date(calYear, calMonth, 1);
+    const lastDay = new Date(calYear, calMonth + 1, 0);
+    const startOffset = (firstDay.getDay() + 1) % 7;
+    const days: (Date | null)[] = Array(startOffset).fill(null);
+    for (let d = 1; d <= lastDay.getDate(); d++) {
+      days.push(new Date(calYear, calMonth, d));
+    }
+    while (days.length % 7 !== 0) days.push(null);
+    return days;
+  }, [calYear, calMonth]);
+
+  const handleDayClick = (dateStr: string) => {
+    if (!pickingEnd) {
+      // First click: anchor the start, enter hover-pick mode
+      setRangeStart(dateStr);
+      setRangeEnd(dateStr);
+      setPickingEnd(true);
+    } else {
+      // Second click: commit the end
+      const [s, e] = dateStr < rangeStart
+        ? [dateStr, rangeStart]
+        : [rangeStart, dateStr];
+      setRangeStart(s);
+      setRangeEnd(e);
+      setPickingEnd(false);
+      setHoverDate(null);
+    }
+  };
+
+  // While picking, compute the live preview range
+  const previewEnd = pickingEnd && hoverDate
+    ? (hoverDate < rangeStart ? rangeStart : hoverDate)
+    : rangeEnd;
+  const previewStart = pickingEnd && hoverDate && hoverDate < rangeStart
+    ? hoverDate
+    : rangeStart;
+
+  const resetToToday = () => {
+    setRangeStart(todayStr);
+    setRangeEnd(todayStr);
+    setPickingEnd(false);
+    setHoverDate(null);
+    setCalViewDate(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+  };
+
 
   const filteredBookings = useMemo(() => {
     if (!searchQuery) return bookings;
@@ -197,28 +289,20 @@ export default function TodayBookings() {
   };
 
   const handleSaveBooking = (data: any) => {
+    // BookingModal بيبعت: { name, phone, date, amountPaid, visitType }
+    // نحط fallback للـ field names القديمة
+    const normalized = {
+      name: data.name ?? data.customerName,
+      phone: data.phone ?? data.customerPhone,
+      date: data.date ?? data.appointmentDate,   // YYYY-MM-DD
+      amountPaid: typeof data.amountPaid === "string"
+        ? parseFloat(data.amountPaid) : data.amountPaid,
+      visitType: data.visitType,
+    };
     if (editingBooking) {
-      handleUpdateBooking(editingBooking.id, {
-        name: data.customerName,
-        phone: data.customerPhone,
-        date: data.appointmentDate,
-        amountPaid:
-          typeof data.amountPaid === "string"
-            ? parseFloat(data.amountPaid)
-            : data.amountPaid,
-        visitType: data.visitType,
-      });
+      handleUpdateBooking(editingBooking.id, normalized);
     } else {
-      handleCreateBooking({
-        name: data.customerName,
-        phone: data.customerPhone,
-        date: data.appointmentDate,
-        amountPaid:
-          typeof data.amountPaid === "string"
-            ? parseFloat(data.amountPaid)
-            : data.amountPaid,
-        visitType: data.visitType,
-      });
+      handleCreateBooking(normalized as any);
     }
   };
 
@@ -227,7 +311,7 @@ export default function TodayBookings() {
       case "confirmed":
         return (
           <Badge
-            colorScheme="green"
+            bg="#666139" color="white" _hover={{ bg: "#555230" }}
             variant="subtle"
             px={2}
             py={0.5}
@@ -279,7 +363,7 @@ export default function TodayBookings() {
     if (examinationStatus === "done")
       return (
         <Badge
-          colorScheme="green"
+          bg="#666139" color="white" _hover={{ bg: "#555230" }}
           variant="subtle"
           px={2}
           py={0.5}
@@ -308,7 +392,7 @@ export default function TodayBookings() {
   };
 
   const getRowBg = (examinationStatus?: ExaminationStatus) => {
-    if (examinationStatus === "done") return "green.50";
+    if (examinationStatus === "done") return "#f4f3ed";
     if (examinationStatus === "waiting") return "yellow.50";
     return undefined;
   };
@@ -316,8 +400,9 @@ export default function TodayBookings() {
   const formatTime = (dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleTimeString("ar-EG", {
-      hour: "2-digit",
+      hour: "numeric",
       minute: "2-digit",
+      hour12: true,
     });
   };
 
@@ -329,10 +414,10 @@ export default function TodayBookings() {
   const handlePrint = () => window.print();
 
   return (
-    <Box minH="100vh" bg="#f0f1f3" dir="rtl" fontFamily="var(--font-tajawal)">
+    <Box minH="100vh" bg="#f0f1f3" dir="rtl">
       {/* Header */}
       <Box
-        bg="linear-gradient(135deg, #615b36 0%, #7a7350 50%, #8a8260 100%)"
+        bg="linear-gradient(135deg, #666139 0%, #7a7350 50%, #8a8260 100%)"
         py={8}
         px={4}
         className="mt-[180px]"
@@ -344,19 +429,18 @@ export default function TodayBookings() {
                 size="xl"
                 color="white"
                 mb={1}
-                fontFamily="var(--font-tajawal)"
               >
                 حجوزات اليوم
               </Heading>
               <Flex align="center" gap={2} color="whiteAlpha.900" fontSize="md">
                 <Calendar size={18} />
                 <Text>
-                  {new Date(selectedDate).toLocaleDateString("ar-EG", {
-                    weekday: "long",
-                    year: "numeric",
-                    month: "long",
-                    day: "numeric",
-                  })}
+                  {rangeStart === rangeEnd
+                    ? new Date(rangeStart + "T00:00:00").toLocaleDateString("ar-EG", {
+                      weekday: "long", year: "numeric", month: "long", day: "numeric",
+                    })
+                    : `${new Date(rangeStart + "T00:00:00").toLocaleDateString("ar-EG", { day: "numeric", month: "long" })} — ${new Date(rangeEnd + "T00:00:00").toLocaleDateString("ar-EG", { day: "numeric", month: "long", year: "numeric" })}`
+                  }
                 </Text>
               </Flex>
             </Box>
@@ -382,7 +466,7 @@ export default function TodayBookings() {
               </Button>
               <Button
                 bg="white"
-                color="#615b36"
+                color="#666139"
                 _hover={{ bg: "whiteAlpha.900" }}
                 onClick={handleAddClick}
                 leftIcon={<Plus size={18} />}
@@ -406,13 +490,13 @@ export default function TodayBookings() {
               gap={4}
             >
               <Box p={3} bg="#fdfbf7" borderRadius="xl">
-                <Users size={24} color="#615b36" />
+                <Users size={24} color="#666139" />
               </Box>
               <Box>
                 <Text fontSize="xs" color="gray.500" fontWeight="medium">
                   إجمالي الحجوزات
                 </Text>
-                <Text fontSize="2xl" fontWeight="bold" color="#615b36">
+                <Text fontSize="2xl" fontWeight="bold" color="#666139">
                   {filteredBookings.length}
                 </Text>
               </Box>
@@ -426,50 +510,192 @@ export default function TodayBookings() {
               alignItems="center"
               gap={4}
             >
-              <Box p={3} bg="green.50" borderRadius="xl">
-                <DollarSign size={24} color="#2d6a4f" />
+              <Box p={3} bg="#f4f3ed" borderRadius="xl">
+                <DollarSign size={24} color="#666139" />
               </Box>
               <Box>
                 <Text fontSize="xs" color="gray.500" fontWeight="medium">
                   إجمالي الدخل
                 </Text>
-                <Text fontSize="2xl" fontWeight="bold" color="#2d6a4f">
+                <Text fontSize="2xl" fontWeight="bold" color="#666139">
                   {totalIncome.toFixed(2)} EGP
                 </Text>
               </Box>
             </Card.Body>
           </Card.Root>
           <Card.Root bg="white" shadow="md" borderRadius="xl" overflow="hidden">
-            <Card.Body
-              p={5}
-              display="flex"
-              flexDirection="row"
-              alignItems="center"
-              gap={4}
-            >
+            <Card.Body p={5} display="flex" flexDirection="row" alignItems="center" gap={4}>
               <Box p={3} bg="blue.50" borderRadius="xl">
                 <CalendarDays size={24} color="#2b6cb0" />
               </Box>
-              <Box flex={1}>
-                <Text fontSize="xs" color="gray.500" fontWeight="medium">
-                  التاريخ
-                </Text>
-                <Input
-                  type="date"
-                  size="sm"
-                  value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)}
-                  border="none"
-                  p={0}
-                  fontWeight="bold"
-                  color="#2b6cb0"
-                  maxW="140px"
-                  className="no-print"
-                />
+              <Box>
+                <Text fontSize="xs" color="gray.500" fontWeight="medium">الفترة المختارة</Text>
+                {rangeStart === rangeEnd ? (
+                  <>
+                    <Text fontSize="md" fontWeight="bold" color="#2b6cb0" lineHeight={1.2}>
+                      {new Date(rangeStart + "T00:00:00").toLocaleDateString("ar-EG", { weekday: "long" })}
+                    </Text>
+                    <Text fontSize="sm" color="gray.500">
+                      {new Date(rangeStart + "T00:00:00").toLocaleDateString("ar-EG", { day: "numeric", month: "long", year: "numeric" })}
+                    </Text>
+                  </>
+                ) : (
+                  <Text fontSize="sm" fontWeight="bold" color="#2b6cb0">
+                    {new Date(rangeStart + "T00:00:00").toLocaleDateString("ar-EG", { day: "numeric", month: "short" })}
+                    {" — "}
+                    {new Date(rangeEnd + "T00:00:00").toLocaleDateString("ar-EG", { day: "numeric", month: "short", year: "numeric" })}
+                  </Text>
+                )}
               </Box>
             </Card.Body>
           </Card.Root>
         </SimpleGrid>
+
+        {/* ── Monthly Calendar Picker ── */}
+        <Card.Root
+          bg="white" shadow="sm" borderRadius="2xl" mb={4}
+          className="no-print" overflow="hidden"
+          onMouseLeave={() => { if (pickingEnd) setHoverDate(null); }}
+        >
+          {/* Header */}
+          <Box bg="linear-gradient(135deg, #6f6a40 0%, #85805a 100%)" px={3} py={2}>
+            <Flex align="center" justify="space-between">
+              <IconButton
+                aria-label="الشهر السابق" size="xs" variant="ghost"
+                color="white" _hover={{ bg: "whiteAlpha.200" }} onClick={prevCalMonth}
+              ><ChevronRight size={14} /></IconButton>
+
+              <Flex align="center" gap={2}>
+                <Text fontWeight="bold" color="white" fontSize="sm">
+                  {calViewDate.toLocaleDateString("ar-EG", { month: "long", year: "numeric" })}
+                </Text>
+                <Button
+                  size="xs" variant="outline" color="white"
+                  borderColor="whiteAlpha.500" _hover={{ bg: "whiteAlpha.200" }}
+                  onClick={resetToToday} borderRadius="full" px={2} py={1} minH="auto" fontSize="xs"
+                >اليوم</Button>
+              </Flex>
+
+              <IconButton
+                aria-label="الشهر التالي" size="xs" variant="ghost"
+                color="white" _hover={{ bg: "whiteAlpha.200" }} onClick={nextCalMonth}
+              ><ChevronLeft size={14} /></IconButton>
+            </Flex>
+          </Box>
+
+          {/* Weekday labels */}
+          <Box display="grid" gridTemplateColumns="repeat(7,1fr)" bg="#eae8dc" borderBottom="1px solid" borderColor="#b8b399">
+            {["السبت", "الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة"].map(d => (
+              <Box key={d} textAlign="center" py={1.5}>
+                <Text fontSize="xs" fontWeight="bold" color="#6f6a40">{d}</Text>
+              </Box>
+            ))}
+          </Box>
+
+          {/* Days grid */}
+          <Box
+            display="grid" gridTemplateColumns="repeat(7,1fr)" p={2} gap={0.5}
+            cursor={pickingEnd ? "crosshair" : "default"}
+          >
+            {calendarDays.map((date, idx) => {
+              if (!date) return <Box key={`empty-${idx}`} />;
+              const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+              const isToday = dateStr === todayStr;
+              const isStart = dateStr === previewStart;
+              const isEnd = dateStr === previewEnd;
+              const isSingleDay = previewStart === previewEnd;
+              const inRange = !isSingleDay && dateStr > previewStart && dateStr < previewEnd;
+              const isEdge = isStart || isEnd;
+
+              return (
+                <Box
+                  key={dateStr}
+                  onClick={() => handleDayClick(dateStr)}
+                  onMouseEnter={() => { if (pickingEnd) setHoverDate(dateStr); }}
+                  cursor="pointer"
+                  display="flex"
+                  flexDirection="column"
+                  alignItems="center"
+                  justifyContent="center"
+                  h="36px"
+                  borderRadius="md"
+                  position="relative"
+                  transition="all 0.05s"
+                  userSelect="none"
+                  bg={
+                    isEdge
+                      ? "#6f6a40"
+                      : inRange
+                        ? "#f0ebe0"
+                        : "transparent"
+                  }
+                  _hover={{
+                    bg: isEdge ? "#5c5733" : pickingEnd ? "#e8e0cc" : "#f0ebe0",
+                    transform: "scale(1.08)",
+                  }}
+                >
+                  {isToday && !isEdge && (
+                    <Box
+                      position="absolute" inset="1px" borderRadius="md"
+                      border="1.5px solid" borderColor="#9d9870"
+                      pointerEvents="none"
+                    />
+                  )}
+                  <Text fontSize="xs" color={isEdge ? "whiteAlpha.900" : isToday ? "#6f6a40" : "gray.500"} lineHeight={1} mb="0">
+                    {["أحد", "اثنين", "ثلاثاء", "أربعاء", "خميس", "جمعة", "سبت"][date.getDay()]}
+                  </Text>
+                  <Text
+                    fontSize="xs"
+                    fontWeight={isEdge || isToday ? "bold" : "normal"}
+                    color={
+                      isEdge ? "white"
+                        : isToday ? "#6f6a40"
+                          : inRange ? "#4a3f28"
+                            : "gray.700"
+                    }
+                    lineHeight={1}
+                  >
+                    {date.getDate()}
+                  </Text>
+                  {isStart && !isSingleDay && (
+                    <Text fontSize="8px" color="whiteAlpha.800" mt="2px" lineHeight={1}>بداية</Text>
+                  )}
+                  {isEnd && !isSingleDay && (
+                    <Text fontSize="8px" color="whiteAlpha.800" mt="2px" lineHeight={1}>
+                      {pickingEnd ? "•" : "نهاية"}
+                    </Text>
+                  )}
+                </Box>
+              );
+            })}
+          </Box>
+
+          {/* Footer */}
+          <Box px={5} py={2.5} bg="gray.50" borderTop="1px solid" borderColor="gray.100">
+            <Flex align="center" justify="space-between" wrap="wrap" gap={3}>
+              <Text fontSize="xs" color={pickingEnd ? "#6f6a40" : "gray.400"} fontWeight={pickingEnd ? "bold" : "normal"}>
+                {pickingEnd
+                  ? "✉️ انقل الماوس واضغط على يوم لتحديد نهاية المدة"
+                  : "اضغط واحدة ليوم واحد • اضغط مرتين لتحديد مدة"
+                }
+              </Text>
+              <Flex gap={2} align="center">
+                {rangeStart !== rangeEnd && (
+                  <Text fontSize="xs" fontWeight="bold" color="#6f6a40">
+                    {new Date(rangeStart + "T00:00:00").toLocaleDateString("ar-EG", { day: "numeric", month: "short" })}
+                    {" — "}
+                    {new Date(rangeEnd + "T00:00:00").toLocaleDateString("ar-EG", { day: "numeric", month: "short", year: "numeric" })}
+                  </Text>
+                )}
+                {(rangeStart !== rangeEnd || pickingEnd) && (
+                  <Button size="xs" variant="ghost" colorPalette="gray" onClick={resetToToday}>
+                    إلغاء
+                  </Button>
+                )}
+              </Flex>
+            </Flex>
+          </Box>
+        </Card.Root>
 
         {/* Filters & Search */}
         <Card.Root
@@ -503,7 +729,7 @@ export default function TodayBookings() {
                     borderRadius="xl"
                     border="1px solid"
                     borderColor="gray.200"
-                    _focus={{ borderColor: "#615b36", bg: "white" }}
+                    _focus={{ borderColor: "#666139", bg: "white" }}
                   />
                   <Box
                     position="absolute"
@@ -523,10 +749,10 @@ export default function TodayBookings() {
                       key={type}
                       size="sm"
                       variant={filterType === type ? "solid" : "ghost"}
-                      bg={filterType === type ? "#615b36" : "transparent"}
+                      bg={filterType === type ? "#666139" : "transparent"}
                       color={filterType === type ? "white" : "gray.600"}
                       _hover={{
-                        bg: filterType === type ? "#4a452a" : "gray.100",
+                        bg: filterType === type ? "#4b482a" : "gray.100",
                       }}
                       onClick={() => setFilterType(type)}
                       rounded="lg"
@@ -534,8 +760,8 @@ export default function TodayBookings() {
                       {type === "all"
                         ? "الكل"
                         : type === "online"
-                        ? "أونلاين"
-                        : "في العيادة"}
+                          ? "أونلاين"
+                          : "في العيادة"}
                     </Button>
                   ))}
                 </Flex>
@@ -547,11 +773,11 @@ export default function TodayBookings() {
                         size="sm"
                         variant={filterStatus === status ? "solid" : "ghost"}
                         bg={
-                          filterStatus === status ? "gray.700" : "transparent"
+                          filterStatus === status ? "#666139" : "transparent"
                         }
                         color={filterStatus === status ? "white" : "gray.600"}
                         _hover={{
-                          bg: filterStatus === status ? "gray.800" : "gray.100",
+                          bg: filterStatus === status ? "#555230" : "gray.100",
                         }}
                         onClick={() => setFilterStatus(status)}
                         rounded="lg"
@@ -559,10 +785,10 @@ export default function TodayBookings() {
                         {status === "all"
                           ? "كل الحالات"
                           : status === "pending"
-                          ? "انتظار"
-                          : status === "confirmed"
-                          ? "مؤكد"
-                          : "ملغي"}
+                            ? "انتظار"
+                            : status === "confirmed"
+                              ? "مؤكد"
+                              : "ملغي"}
                       </Button>
                     )
                   )}
@@ -582,7 +808,7 @@ export default function TodayBookings() {
             borderRadius="xl"
             shadow="sm"
           >
-            <Spinner size="xl" color="#615b36" />
+            <Spinner size="xl" color="#666139" />
           </Flex>
         ) : (
           <Card.Root bg="white" shadow="md" borderRadius="xl" overflow="hidden">
@@ -604,7 +830,7 @@ export default function TodayBookings() {
                 </Box>
               ) : (
                 <SimpleGrid columns={1} gap={4}>
-                  {filteredBookings.map((booking) => (
+                  {filteredBookings.map((booking, index) => (
                     <Box
                       key={booking.id}
                       as="button"
@@ -617,18 +843,18 @@ export default function TodayBookings() {
                         booking.examinationStatus === "done"
                           ? "green.200"
                           : booking.examinationStatus === "waiting"
-                          ? "yellow.200"
-                          : "gray.200"
+                            ? "yellow.200"
+                            : "gray.200"
                       }
                       bg={
                         booking.examinationStatus === "done"
-                          ? "green.50"
+                          ? "#f4f3ed"
                           : booking.examinationStatus === "waiting"
-                          ? "yellow.50"
-                          : "white"
+                            ? "yellow.50"
+                            : "white"
                       }
                       shadow="sm"
-                      _hover={{ shadow: "md", borderColor: "#615b36" }}
+                      _hover={{ shadow: "md", borderColor: "#666139" }}
                       transition="all 0.2s"
                       onClick={() =>
                         router.push(`/patient-history/${booking.id}`)
@@ -658,7 +884,16 @@ export default function TodayBookings() {
                           </Badge>
                         </Flex>
                         <Flex align="center" gap={3} flex={1} minW={0}>
-                          <Avatar.Root size="sm" flexShrink={0} bg="#615b36">
+                          <Text
+                            fontWeight="bold"
+                            fontSize="lg"
+                            color="#666139"
+                            minW="28px"
+                            flexShrink={0}
+                          >
+                            {index + 1}
+                          </Text>
+                          <Avatar.Root size="sm" flexShrink={0} bg="#666139">
                             <Avatar.Fallback
                               color="white"
                               fontWeight="bold"
@@ -683,7 +918,7 @@ export default function TodayBookings() {
                               <Text
                                 fontSize="sm"
                                 fontWeight="bold"
-                                color="#615b36"
+                                color="#666139"
                               >
                                 {formatTime(booking.appointmentDate)}
                               </Text>
@@ -699,8 +934,8 @@ export default function TodayBookings() {
                                 {booking.visitType === "checkup"
                                   ? "كشف"
                                   : booking.visitType === "followup"
-                                  ? "إعادة"
-                                  : "-"}
+                                    ? "إعادة"
+                                    : "-"}
                               </Badge>
                             </Flex>
                           </Box>
@@ -715,7 +950,7 @@ export default function TodayBookings() {
                         borderColor="gray.100"
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <Text fontWeight="bold" color="#615b36">
+                        <Text fontWeight="bold" color="#666139">
                           {formatAmount(booking.amountPaid)} EGP
                         </Text>
                         <Flex gap={2}>
@@ -799,6 +1034,17 @@ export default function TodayBookings() {
                   borderColor="gray.100"
                 >
                   <Table.Row>
+                    <Table.ColumnHeader
+                      py={4}
+                      px={4}
+                      fontSize="xs"
+                      fontWeight="bold"
+                      color="gray.600"
+                      textTransform="uppercase"
+                      w="56px"
+                    >
+                      رقم
+                    </Table.ColumnHeader>
                     <Table.ColumnHeader
                       py={4}
                       px={4}
@@ -895,7 +1141,7 @@ export default function TodayBookings() {
                 <Table.Body>
                   {filteredBookings.length === 0 ? (
                     <Table.Row>
-                      <Table.Cell colSpan={8} textAlign="center" py={16}>
+                      <Table.Cell colSpan={9} textAlign="center" py={16}>
                         <Users
                           size={48}
                           color="#e2e8f0"
@@ -910,17 +1156,17 @@ export default function TodayBookings() {
                       </Table.Cell>
                     </Table.Row>
                   ) : (
-                    filteredBookings.map((booking) => (
+                    filteredBookings.map((booking, index) => (
                       <Table.Row
                         key={booking.id}
                         bg={getRowBg(booking.examinationStatus)}
                         _hover={{
                           bg:
                             booking.examinationStatus === "done"
-                              ? "green.100"
+                              ? "#e0decc"
                               : booking.examinationStatus === "waiting"
-                              ? "yellow.100"
-                              : "gray.50",
+                                ? "yellow.100"
+                                : "gray.50",
                         }}
                         cursor="pointer"
                         onClick={(e) => {
@@ -934,9 +1180,12 @@ export default function TodayBookings() {
                         }}
                         transition="background 0.15s"
                       >
+                        <Table.Cell py={4} px={4} fontWeight="bold" color="#666139">
+                          {index + 1}
+                        </Table.Cell>
                         <Table.Cell py={4} px={4}>
                           <Flex align="center" gap={3}>
-                            <Avatar.Root size="sm" bg="#615b36" flexShrink={0}>
+                            <Avatar.Root size="sm" bg="#666139" flexShrink={0}>
                               <Avatar.Fallback
                                 color="white"
                                 fontWeight="bold"
@@ -990,8 +1239,8 @@ export default function TodayBookings() {
                             {booking.visitType === "checkup"
                               ? "كشف"
                               : booking.visitType === "followup"
-                              ? "إعادة"
-                              : "-"}
+                                ? "إعادة"
+                                : "-"}
                           </Badge>
                         </Table.Cell>
                         <Table.Cell
@@ -1006,7 +1255,7 @@ export default function TodayBookings() {
                           py={4}
                           px={4}
                           fontWeight="bold"
-                          color="#615b36"
+                          color="#666139"
                         >
                           {formatAmount(booking.amountPaid)} EGP
                         </Table.Cell>

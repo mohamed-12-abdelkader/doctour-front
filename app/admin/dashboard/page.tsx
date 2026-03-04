@@ -291,6 +291,35 @@ export default function AdminDashboard() {
           </Box>
         ))}
 
+        {/* Seed hint - optional */}
+        <Box
+          mt={8}
+          p={4}
+          bg="orange.50"
+          borderRadius="xl"
+          border="1px solid"
+          borderColor="orange.100"
+        >
+          <Text fontSize="sm" color="orange.800">
+            <Text as="span" fontWeight="bold">
+              ملاحظة:
+            </Text>{" "}
+            في حال الحاجة لتهيئة قاعدة البيانات، يمكنك تشغيل{" "}
+            <Text
+              as="a"
+              href="/api/seed"
+              target="_blank"
+              rel="noopener"
+              color="orange.600"
+              textDecoration="underline"
+              _hover={{ color: "orange.700" }}
+              fontWeight="bold"
+            >
+              نقطة الـ seed
+            </Text>
+            .
+          </Text>
+        </Box>
       </Container>
     </Box>
   );

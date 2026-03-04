@@ -12,7 +12,7 @@ import {
 } from "@chakra-ui/react";
 import { doctorInfo } from "@/data/services";
 import { MotionBox, fadeInUp, staggerContainer } from "./MotionBox";
-import img from "@/images/ream.png";
+import heroImg from "@/images/eldoctour.svg";
 import NextImage from "next/image";
 import OnlineBookingModal from "@/components/OnlineBookingModal";
 
@@ -34,10 +34,10 @@ export default function HeroSection() {
         position="relative"
         overflow="hidden"
         minH={{ base: "auto", md: "65vh", lg: "70vh" }}
-        py={{ base: 6, sm: 8, md: 10, lg: 12 }}
+        py={{ base: 10, sm: 12, md: 14, lg: 16 }}
         px={{ base: 3, sm: 4 }}
         display="flex"
-        alignItems="flex-end"
+        alignItems={{ base: "stretch", lg: "flex-end" }}
       >
         <Box
           position="absolute"
@@ -59,8 +59,8 @@ export default function HeroSection() {
           <Flex
             justify="space-between"
             direction={{ base: "column-reverse", lg: "row" }}
-            gap={{ base: 6, sm: 8, md: 10, lg: 10 }}
-            alignItems="flex-end"
+            gap={{ base: 8, sm: 10, md: 12, lg: 10 }}
+            alignItems={{ base: "flex-start", lg: "flex-end" }}
             h="100%"
           >
             {/* النص — يبدأ من اليمين في كل الشاشات */}
@@ -70,14 +70,19 @@ export default function HeroSection() {
               animate="visible"
               variants={staggerContainer}
               textAlign="right"
-              mb={{ base: 4, sm: 6, lg: 28 }}
+              mb={{ base: 2, sm: 4, lg: 28 }}
               minW={0}
             >
               <Stack gap={{ base: 2, sm: 3, md: 4 }}>
                 <MotionBox variants={fadeInUp}>
                   <Heading
                     as="h1"
-                    fontSize="66.6px"
+                    fontSize={{
+                      base: "2.2rem",
+                      sm: "2.6rem",
+                      md: "3.2rem",
+                      lg: "3.8rem",
+                    }}
                     fontWeight="700"
                     color={BRAND.color}
                     lineHeight="1.15"
@@ -113,37 +118,43 @@ export default function HeroSection() {
 
                 <MotionBox variants={fadeInUp}>
                   <Flex
-                    justifyContent="flex-start"
+                    justifyContent={{ base: "space-between", md: "flex-start" }}
                     width="100%"
-                    gap={3}
+                    gap={{ base: 3, md: 4 }}
                     pt={{ base: 2, md: 3 }}
                     pb={{ base: 2, lg: 0 }}
-                    flexWrap="wrap"
+                    flexWrap={{ base: "nowrap", md: "wrap" }}
                   >
-                    <Button
-                      onClick={onOpen}
-                      size="lg"
-                      bg={BRAND.bg}
-                      color="white"
-                      px={{ base: 5, sm: 6, md: 8, lg: 10 }}
-                      py={{ base: 3, sm: 3.5, md: 4 }}
-                      minH={{ base: "40px", sm: "42px", md: "44px" }}
-                      rounded="xl"
-                      fontSize={{ base: "md", sm: "lg", md: "xl" }}
-                      fontWeight="bold"
-                      _hover={{
-                        bg: BRAND.bgHover,
-                        transform: "translateY(-2px)",
-                        boxShadow: "xl",
-                      }}
-                      transition="all 0.3s"
-                    >
-                      حجز موعد
-                    </Button>
-                    <a
+                    <Box flex={1} minW={0}>
+                      <Button
+                        onClick={onOpen}
+                        size="lg"
+                        bg={BRAND.bg}
+                        color="white"
+                        w="100%"
+                        px={{ base: 4, sm: 5, md: 8, lg: 10 }}
+                        py={{ base: 3, sm: 3.5, md: 4 }}
+                        minH={{ base: "40px", sm: "42px", md: "44px" }}
+                        rounded="xl"
+                        fontSize={{ base: "md", sm: "lg", md: "xl" }}
+                        fontWeight="bold"
+                        _hover={{
+                          bg: BRAND.bgHover,
+                          transform: "translateY(-2px)",
+                          boxShadow: "xl",
+                        }}
+                        transition="all 0.3s"
+                      >
+                        حجز موعد اونلاين
+                      </Button>
+                    </Box>
+                    <Box
+                      as="a"
                       href={doctorInfo.whatsappUrl}
                       target="_blank"
                       rel="noopener noreferrer"
+                      flex={1}
+                      minW={0}
                     >
                       <Button
                         size="lg"
@@ -152,7 +163,8 @@ export default function HeroSection() {
                         borderWidth="2px"
                         borderColor={BRAND.bg}
                         bg="transparent"
-                        px={{ base: 5, sm: 6, md: 8, lg: 10 }}
+                        w="100%"
+                        px={{ base: 4, sm: 5, md: 8, lg: 10 }}
                         py={{ base: 3, sm: 3.5, md: 4 }}
                         minH={{ base: "40px", sm: "42px", md: "44px" }}
                         rounded="xl"
@@ -168,7 +180,7 @@ export default function HeroSection() {
                       >
                         تواصل واتساب
                       </Button>
-                    </a>
+                    </Box>
                   </Flex>
                 </MotionBox>
               </Stack>
@@ -189,16 +201,16 @@ export default function HeroSection() {
             >
               <Box
                 position="relative"
-                w="fit-content"
+                w="100%"
                 maxW={{
-                  base: "200px",
-                  sm: "260px",
-                  md: "340px",
-                  lg: "420px",
-                  xl: "480px",
+                  base: "260px",
+                  sm: "320px",
+                  md: "380px",
+                  lg: "440px",
+                  xl: "520px",
                 }}
-                mx="auto"
-                borderRadius={{ base: "xl", sm: "2xl", md: "3xl" }}
+                mx={{ base: "auto", lg: "0" }}
+                borderRadius={{ base: "2xl", sm: "3xl", md: "3xl" }}
                 overflow="hidden"
                 boxShadow="0 20px 40px -12px rgba(93, 86, 44, 0.2), 0 8px 20px -8px rgba(0,0,0,0.1)"
                 borderWidth="1px"
@@ -208,12 +220,14 @@ export default function HeroSection() {
               >
                 <NextImage
                   alt={doctorInfo.name}
-                  src={img}
-                  width={img.width ?? 580}
-                  height={img.height ?? 754}
-                  style={{ width: "100%", height: "auto", display: "block" }}
+                  src={heroImg}
                   priority
-                  sizes="(max-width: 380px) 200px, (max-width: 480px) 260px, (max-width: 640px) 340px, (max-width: 768px) 340px, (max-width: 1024px) 420px, 480px"
+                  unoptimized
+                  style={{
+                    width: "100%",
+                    height: "auto",
+                    display: "block",
+                  }}
                 />
               </Box>
               <Box

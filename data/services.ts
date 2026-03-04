@@ -115,12 +115,9 @@ export const doctorInfo = {
     tiktok: "https://www.tiktok.com/@reematef63",
   },
   locations: [
-    "المنيا - شارع طه حسين بجوار توكيل كارينا",
+    "المنيا -📍 شارع طه حسين – أمام النادي الرياضي – أعلى عصير الإسكندراني – الدور الثاني علوي",
     "بني مزار – شرق المحطة – أمام البوسطة القديمة – بجوار صيدلية د/ ريمون عريان",
   ],
   /** روابط خرائط جوجل لكل فرع (اختياري). بني مزار = رابط الموقع على الخريطة */
-  locationMapUrls: [
-    undefined,
-    "https://maps.app.goo.gl/kgRnA4rptKV56KH16",
-  ],
+  locationMapUrls: [undefined, "https://maps.app.goo.gl/kgRnA4rptKV56KH16"],
 };

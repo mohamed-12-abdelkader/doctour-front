@@ -92,9 +92,9 @@ export default function Navbar() {
     () =>
       loggedIn
         ? getVisibleNavLinks(permissions, isFullAdmin).map((l) => ({
-            name: l.title,
-            href: l.href,
-          }))
+          name: l.title,
+          href: l.href,
+        }))
         : [],
     [loggedIn, permissions, isFullAdmin],
   );
@@ -200,7 +200,7 @@ export default function Navbar() {
 
               {/* لوجو + زر حجز أو تسجيل خروج (ديسكتوب فقط) */}
               <Flex align="center" gap={{ base: 2, md: 4 }} flexShrink={0}>
-                {mounted && loggedIn ? (
+                {mounted && loggedIn && (
                   <Button
                     display={{ base: "none", md: "inline-flex" }}
                     onClick={handleLogout}
@@ -213,20 +213,6 @@ export default function Navbar() {
                   >
                     <LogOut size={16} />
                     تسجيل خروج
-                  </Button>
-                ) : (
-                  <Button
-                    display={{ base: "none", md: "inline-flex" }}
-                    onClick={onBookingOpen}
-                    variant="solid"
-                    bg={BRAND.color}
-                    color="white"
-                    _hover={{ bg: BRAND.colorHover }}
-                    size="sm"
-                    borderRadius="full"
-                    px={6}
-                  >
-                    حجز موعد
                   </Button>
                 )}
                 <Logo />
@@ -269,7 +255,7 @@ export default function Navbar() {
                         {link.name}
                       </ChakraLink>
                     ))}
-                    {mounted && loggedIn ? (
+                    {mounted && loggedIn && (
                       <Box px={2} pt={2} pb={1}>
                         <Button
                           w="full"
@@ -286,24 +272,6 @@ export default function Navbar() {
                         >
                           <LogOut size={18} />
                           تسجيل خروج
-                        </Button>
-                      </Box>
-                    ) : (
-                      <Box px={2} pt={2} pb={1}>
-                        <Button
-                          w="full"
-                          size="lg"
-                          onClick={() => {
-                            onBookingOpen();
-                            onToggle();
-                          }}
-                          bg={BRAND.color}
-                          color="white"
-                          _hover={{ bg: BRAND.colorHover }}
-                          borderRadius="xl"
-                          fontWeight="bold"
-                        >
-                          حجز موعد
                         </Button>
                       </Box>
                     )}

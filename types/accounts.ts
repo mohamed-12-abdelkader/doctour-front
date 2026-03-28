@@ -42,7 +42,8 @@ export interface AddIncomeBody {
 export interface ManualIncomeEntry {
     id?: number;
     description: string;
-    amount: number;
+    /** قد يُعاد كنص عشري من الـ API */
+    amount: number | string;
     entryDate: string;
     createdAt?: string;
 }
@@ -56,17 +57,38 @@ export interface ManualIncomeResponse {
 export interface AddExpenseBody {
     description: string;
     amount: number;
-    expenseDate?: string; // YYYY-MM-DD
-    notes?: string;
+    /** مستحسن حسب الـ doc */
+    date?: string | null; // YYYY-MM-DD
+    /** backward compat (لو الـ API القديم يستخدم expenseDate) */
+    expenseDate?: string | null; // YYYY-MM-DD
+    category_id: number;
+    /** اختياري حسب التعديل الأخير */
+    subcategory_id?: number | null;
+    notes?: string | null;
 }
 
-// API: GET /accounts/expenses
+export interface ExpenseCategory {
+    id: number;
+    name: string;
+}
+
+export interface ExpenseSubcategory {
+    id: number;
+    name: string;
+    categoryId: number;
+}
+
+// API: GET /accounts/expenses — يشمل أسماء التصنيف في category / subcategory
 export interface ExpenseEntry {
     id?: number;
     description: string;
-    amount: number;
+    amount: string | number;
     expenseDate: string;
-    notes?: string;
+    notes?: string | null;
+    categoryId?: number;
+    subcategoryId?: number;
+    category?: ExpenseCategory;
+    subcategory?: ExpenseSubcategory;
     createdAt?: string;
 }
 export interface ExpensesResponse {

@@ -134,6 +134,31 @@ export function getIsFullAdmin(): boolean {
   }
 }
 
+/**
+ * سوبر أدمن: `role === "admin"` ومصفوفة `permissions` فارغة `[]`
+ * (نفس شكل الاستجابة بعد تسجيل الدخول — صلاحيات كاملة من السيرفر دون قائمة صلاحيات).
+ */
+export function isSuperAdminUser(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const raw = localStorage.getItem("user");
+    if (!raw) return false;
+    const data = JSON.parse(raw) as Record<string, unknown>;
+    const role = (data.role ??
+      (data.user as Record<string, unknown>)?.role) as string | undefined;
+    const perms = (data.permissions ??
+      (data.user as Record<string, unknown>)?.permissions) as
+      | string[]
+      | Array<{ name: string }>
+      | undefined;
+    if (role !== "admin") return false;
+    if (!Array.isArray(perms)) return false;
+    return perms.length === 0;
+  } catch {
+    return false;
+  }
+}
+
 export function canSeeLink(
   linkPermission: string | string[] | null,
   userPermissions: string[],

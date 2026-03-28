@@ -2,13 +2,13 @@
 
 import {
     Box, Container, Flex, Heading, Text, Input, Table, Badge, IconButton, Button,
-    Avatar, MenuRoot, MenuTrigger, MenuContent, MenuItem, Spinner, Card, SimpleGrid,
+    Avatar, MenuRoot, MenuTrigger, MenuContent, MenuItem, Spinner, Card, Stack,
 } from '@chakra-ui/react'
 import { useState, useMemo, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import {
     Search, FileText, ChevronDown, CheckCircle, XCircle, Clock, Calendar,
-    ChevronRight, ChevronLeft, Users, RefreshCw,
+    ChevronRight, ChevronLeft, RefreshCw,
 } from 'lucide-react'
 import { Booking, BookingStatus, ExaminationStatus } from '@/types/booking'
 import api from '@/lib/axios'
@@ -139,8 +139,10 @@ export default function DoctorAppointments() {
         }
     }
 
-    const formatTime = (dateString: string) =>
-        new Date(dateString).toLocaleTimeString('ar-EG', { hour: 'numeric', minute: '2-digit', hour12: true })
+    const formatTime = (dateString: string | null | undefined) =>
+        dateString
+            ? new Date(dateString).toLocaleTimeString('ar-EG', { hour: 'numeric', minute: '2-digit', hour12: true })
+            : '—'
 
     const getRowBg = (s?: ExaminationStatus) =>
         s === 'done' ? 'green.50' : s === 'waiting' ? 'yellow.50' : 'white'
@@ -151,6 +153,76 @@ export default function DoctorAppointments() {
         return <Text fontSize="sm" color="gray.400">—</Text>
     }
 
+    const visitTypeLabel = (vt?: string | null) =>
+        vt === 'checkup' ? 'كشف' : vt === 'followup' ? 'إعادة' : vt === 'consultation' ? 'استشارة' : vt ?? ''
+
+    /** صف إجراءات مشترك بين الجدول والبطاقة */
+    const renderBookingActions = (booking: Booking, compact?: boolean) => (
+        <Flex gap={2} flexWrap="wrap" justifyContent={compact ? 'stretch' : 'flex-start'}>
+            <Button
+                size={compact ? 'sm' : 'sm'}
+                flex={compact ? 1 : undefined}
+                minW={compact ? 0 : undefined}
+                colorPalette="blue"
+                onClick={() => router.push(`/patient-history/${booking.id}`)}
+            >
+                <FileText size={16} />
+                فتح الملف
+            </Button>
+            {booking.bookingType === 'online' && (
+                <MenuRoot>
+                    <MenuTrigger asChild>
+                        <IconButton
+                            aria-label="حالة الحجز"
+                            size="sm"
+                            variant={compact ? 'outline' : 'ghost'}
+                            flexShrink={0}
+                        >
+                            <ChevronDown size={16} />
+                        </IconButton>
+                    </MenuTrigger>
+                    <MenuContent>
+                        <MenuItem onClick={() => handleStatusChange(booking.id, 'pending')} value="pending">
+                            <Clock size={16} /> قيد الانتظار
+                        </MenuItem>
+                        <MenuItem onClick={() => handleStatusChange(booking.id, 'confirmed')} value="confirmed" color="green.500">
+                            <CheckCircle size={16} /> تم الكشف
+                        </MenuItem>
+                        <MenuItem onClick={() => handleStatusChange(booking.id, 'cancelled')} value="cancelled" color="red.500">
+                            <XCircle size={16} /> إلغاء الموعد
+                        </MenuItem>
+                        <MenuItem onClick={() => handleStatusChange(booking.id, 'rejected')} value="rejected" color="red.500">
+                            <XCircle size={16} /> رفض
+                        </MenuItem>
+                    </MenuContent>
+                </MenuRoot>
+            )}
+        </Flex>
+    )
+
+    const renderExaminationCell = (booking: Booking) => (
+        <Flex align="center" gap={2} flexWrap="wrap">
+            {getExaminationStatusBadge(booking.examinationStatus)}
+            {isAdmin && (
+                <MenuRoot>
+                    <MenuTrigger asChild>
+                        <IconButton aria-label="تغيير حالة الكشف" size="xs" variant="ghost" colorPalette="gray">
+                            <ChevronDown size={14} />
+                        </IconButton>
+                    </MenuTrigger>
+                    <MenuContent>
+                        <MenuItem onClick={() => handleExaminationStatusChange(booking.id, 'waiting')} value="waiting">
+                            <Clock size={14} /> انتظار
+                        </MenuItem>
+                        <MenuItem onClick={() => handleExaminationStatusChange(booking.id, 'done')} value="done" color="green.500">
+                            <CheckCircle size={14} /> تم الكشف
+                        </MenuItem>
+                    </MenuContent>
+                </MenuRoot>
+            )}
+        </Flex>
+    )
+
     const dateLabel = rangeStart === rangeEnd
         ? new Date(rangeStart + 'T00:00:00').toLocaleDateString('ar-EG', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
         : `${new Date(rangeStart + 'T00:00:00').toLocaleDateString('ar-EG', { day: 'numeric', month: 'long' })} — ${new Date(rangeEnd + 'T00:00:00').toLocaleDateString('ar-EG', { day: 'numeric', month: 'long', year: 'numeric' })}`
@@ -158,36 +230,37 @@ export default function DoctorAppointments() {
     // ── Render ────────────────────────────────────────────────────────────────
     return (
         <Box minH="100vh" bg="#f8f9fa" dir="rtl">
-            <Container maxW="8xl" py={8}>
+            <Container maxW="8xl" py={{ base: 4, md: 8 }} px={{ base: 3, md: 6 }}>
 
                 {/* ── Page Header ── */}
-                <Flex justify="space-between" align="center" mb={6} flexWrap="wrap" gap={4}>
+                <Flex justify="space-between" align={{ base: 'stretch', md: 'center' }} mb={6} flexWrap="wrap" gap={4} direction={{ base: 'column', md: 'row' }}>
                     <Box>
-                        <Heading size="lg" color="#2d3748" mb={1}>عيادة الدكتورة</Heading>
-                        <Flex align="center" gap={2} color="gray.500" fontSize="sm">
+                        <Heading size={{ base: 'md', md: 'lg' }} color="#2d3748" mb={1}>عيادة الدكتورة</Heading>
+                        <Flex align="center" gap={2} color="gray.500" fontSize={{ base: 'xs', md: 'sm' }} flexWrap="wrap">
                             <Calendar size={15} />
-                            <Text>{dateLabel}</Text>
+                            <Text lineHeight="tall">{dateLabel}</Text>
                         </Flex>
                     </Box>
 
                     {/* Stats + Refresh */}
-                    <Flex gap={3} align="center">
+                    <Flex gap={3} align="center" flexWrap="wrap" w={{ base: 'full', md: 'auto' }} justify={{ base: 'space-between', md: 'flex-end' }}>
                         <Button
                             variant="ghost" colorPalette="gray" size="sm"
                             onClick={fetchBookings} loading={isLoading}
+                            flexShrink={0}
                         >
                             <RefreshCw size={16} style={{ marginLeft: 6 }} />
                             تحديث
                         </Button>
-                        <Box bg="white" px={5} py={3} rounded="xl" shadow="sm" display="flex" gap={6}>
-                            <Box textAlign="center">
+                        <Box bg="white" px={{ base: 4, md: 5 }} py={3} rounded="xl" shadow="sm" display="flex" gap={{ base: 4, md: 6 }} flex={1} minW={0} justifyContent="center">
+                            <Box textAlign="center" flex={1}>
                                 <Text fontSize="xs" color="gray.500">الحجوزات</Text>
-                                <Text fontSize="2xl" fontWeight="bold" color="#615b36">{bookings.length}</Text>
+                                <Text fontSize={{ base: 'xl', md: '2xl' }} fontWeight="bold" color="#615b36">{bookings.length}</Text>
                             </Box>
-                            <Box w="1px" bg="gray.200" />
-                            <Box textAlign="center">
+                            <Box w="1px" bg="gray.200" alignSelf="stretch" />
+                            <Box textAlign="center" flex={1}>
                                 <Text fontSize="xs" color="gray.500">تم الكشف</Text>
-                                <Text fontSize="2xl" fontWeight="bold" color="green.600">{examinedCount}</Text>
+                                <Text fontSize={{ base: 'xl', md: '2xl' }} fontWeight="bold" color="green.600">{examinedCount}</Text>
                             </Box>
                         </Box>
                     </Flex>
@@ -349,129 +422,140 @@ export default function DoctorAppointments() {
                     </Flex>
                 </Flex>
 
-                {/* ── Table ── */}
+                {/* ── قائمة المرضى: جدول (شاشات ≥ md) + بطاقات (موبايل) ── */}
                 {isLoading ? (
                     <Flex justify="center" align="center" minH="300px">
                         <Spinner size="xl" color="#615b36" />
                     </Flex>
-                ) : (
-                    <Box bg="white" rounded="2xl" shadow="sm" overflow="hidden">
-                        <Table.Root>
-                            <Table.Header style={{ backgroundColor: '#fdfbf7' }}>
-                                <Table.Row>
-                                    <Table.ColumnHeader style={{ padding: '16px', textAlign: 'right' }}>المريض</Table.ColumnHeader>
-                                    <Table.ColumnHeader style={{ padding: '16px', textAlign: 'right' }}>وقت الحجز</Table.ColumnHeader>
-                                    <Table.ColumnHeader style={{ padding: '16px', textAlign: 'right' }}>نوع الكشف</Table.ColumnHeader>
-                                    <Table.ColumnHeader style={{ padding: '16px', textAlign: 'right' }}>حالة الكشف</Table.ColumnHeader>
-                                    <Table.ColumnHeader style={{ padding: '16px', textAlign: 'right' }}>إجراءات</Table.ColumnHeader>
-                                </Table.Row>
-                            </Table.Header>
-                            <Table.Body>
-                                {filteredBookings.length === 0 ? (
-                                    <Table.Row>
-                                        <Table.Cell colSpan={5} style={{ padding: '60px', textAlign: 'center' }}>
-                                            <Flex direction="column" align="center" gap={2}>
-                                                <Calendar size={40} color="#e2e8f0" />
-                                                <Text color="gray.500" fontWeight="medium">لا توجد حجوزات في هذه الفترة</Text>
-                                                <Text color="gray.400" fontSize="sm">اختر يوماً أو فترة مختلفة من التقويم أعلاه</Text>
-                                            </Flex>
-                                        </Table.Cell>
-                                    </Table.Row>
-                                ) : (
-                                    filteredBookings.map((booking) => (
-                                        <Table.Row
-                                            key={booking.id}
-                                            style={{ borderBottom: '1px solid #edf2f7', background: getRowBg(booking.examinationStatus) }}
-                                        >
-                                            <Table.Cell style={{ padding: '16px' }}>
-                                                <Flex align="center" gap={3}>
-                                                    <Avatar.Root size="sm" colorPalette={booking.examinationStatus === 'done' ? 'green' : 'blue'}>
-                                                        <Avatar.Fallback name={booking.customerName} />
-                                                    </Avatar.Root>
-                                                    <Box>
-                                                        <Text fontWeight="bold">{booking.customerName}</Text>
-                                                        <Text fontSize="xs" color="gray.500">{booking.customerPhone}</Text>
-                                                    </Box>
-                                                </Flex>
-                                            </Table.Cell>
-                                            <Table.Cell style={{ padding: '16px' }}>
-                                                <Flex align="center" gap={2} color="gray.600">
-                                                    <Clock size={16} />
-                                                    <Text fontWeight="medium">{formatTime(booking.appointmentDate)}</Text>
-                                                </Flex>
-                                            </Table.Cell>
-                                            <Table.Cell style={{ padding: '16px' }}>
-                                                <Badge colorPalette={booking.bookingType === 'online' ? 'purple' : 'blue'}>
-                                                    {booking.bookingType === 'online' ? 'أونلاين' : 'عيادة'}
-                                                </Badge>
-                                                {booking.visitType && (
-                                                    <Text as="span" fontSize="xs" color="gray.500" mr={2}>
-                                                        ({booking.visitType === 'checkup' ? 'كشف' : 'إعادة'})
-                                                    </Text>
-                                                )}
-                                            </Table.Cell>
-                                            <Table.Cell style={{ padding: '16px' }}>
-                                                <Flex align="center" gap={2}>
-                                                    {getExaminationStatusBadge(booking.examinationStatus)}
-                                                    {isAdmin && (
-                                                        <MenuRoot>
-                                                            <MenuTrigger asChild>
-                                                                <IconButton aria-label="تغيير حالة الكشف" size="xs" variant="ghost" colorPalette="gray">
-                                                                    <ChevronDown size={14} />
-                                                                </IconButton>
-                                                            </MenuTrigger>
-                                                            <MenuContent>
-                                                                <MenuItem onClick={() => handleExaminationStatusChange(booking.id, 'waiting')} value="waiting">
-                                                                    <Clock size={14} /> انتظار
-                                                                </MenuItem>
-                                                                <MenuItem onClick={() => handleExaminationStatusChange(booking.id, 'done')} value="done" color="green.500">
-                                                                    <CheckCircle size={14} /> تم الكشف
-                                                                </MenuItem>
-                                                            </MenuContent>
-                                                        </MenuRoot>
-                                                    )}
-                                                </Flex>
-                                            </Table.Cell>
-                                            <Table.Cell style={{ padding: '16px' }}>
-                                                <Flex gap={2}>
-                                                    <Button
-                                                        size="sm" colorPalette="blue"
-                                                        onClick={() => router.push(`/patient-history/${booking.id}`)}
-                                                    >
-                                                        <FileText size={16} />
-                                                        فتح الملف
-                                                    </Button>
-                                                    {booking.bookingType === 'online' && (
-                                                        <MenuRoot>
-                                                            <MenuTrigger asChild>
-                                                                <IconButton aria-label="Status" size="sm" variant="ghost">
-                                                                    <ChevronDown size={16} />
-                                                                </IconButton>
-                                                            </MenuTrigger>
-                                                            <MenuContent>
-                                                                <MenuItem onClick={() => handleStatusChange(booking.id, 'pending')} value="pending">
-                                                                    <Clock size={16} /> قيد الانتظار
-                                                                </MenuItem>
-                                                                <MenuItem onClick={() => handleStatusChange(booking.id, 'confirmed')} value="confirmed" color="green.500">
-                                                                    <CheckCircle size={16} /> تم الكشف
-                                                                </MenuItem>
-                                                                <MenuItem onClick={() => handleStatusChange(booking.id, 'cancelled')} value="cancelled" color="red.500">
-                                                                    <XCircle size={16} /> إلغاء الموعد
-                                                                </MenuItem>
-                                                                <MenuItem onClick={() => handleStatusChange(booking.id, 'rejected')} value="rejected" color="red.500">
-                                                                    <XCircle size={16} /> رفض
-                                                                </MenuItem>
-                                                            </MenuContent>
-                                                        </MenuRoot>
-                                                    )}
-                                                </Flex>
-                                            </Table.Cell>
-                                        </Table.Row>
-                                    ))
-                                )}
-                            </Table.Body>
-                        </Table.Root>
+                ) : filteredBookings.length === 0 ? (
+                    <Box bg="white" rounded="2xl" shadow="sm" p={{ base: 8, md: 12 }} textAlign="center">
+                        <Flex direction="column" align="center" gap={2}>
+                            <Calendar size={40} color="#e2e8f0" />
+                            <Text color="gray.500" fontWeight="medium">لا توجد حجوزات في هذه الفترة</Text>
+                            <Text color="gray.400" fontSize="sm">اختر يوماً أو فترة مختلفة من التقويم أعلاه</Text>
+                        </Flex>
                     </Box>
+                ) : (
+                    <>
+                        {/* موبايل: بطاقات */}
+                        <Stack gap={3} display={{ base: 'flex', md: 'none' }} pb={2}>
+                            {filteredBookings.map((booking) => (
+                                <Card.Root
+                                    key={booking.id}
+                                    bg={getRowBg(booking.examinationStatus)}
+                                    shadow="sm"
+                                    borderRadius="xl"
+                                    overflow="hidden"
+                                    borderWidth="1px"
+                                    borderColor="gray.100"
+                                >
+                                    <Card.Body p={4}>
+                                        <Flex align="flex-start" justify="space-between" gap={3} mb={3}>
+                                            <Flex align="center" gap={3} minW={0}>
+                                                <Avatar.Root size="md" colorPalette={booking.examinationStatus === 'done' ? 'green' : 'blue'} flexShrink={0}>
+                                                    <Avatar.Fallback name={booking.customerName} />
+                                                </Avatar.Root>
+                                                <Box minW={0}>
+                                                    <Text fontWeight="bold" fontSize="sm" lineClamp={2}>{booking.customerName}</Text>
+                                                    <Text fontSize="xs" color="gray.500" dir="ltr" textAlign="right">{booking.customerPhone}</Text>
+                                                </Box>
+                                            </Flex>
+                                        </Flex>
+
+                                        <Flex align="center" gap={2} color="gray.600" mb={2} fontSize="sm">
+                                            <Clock size={16} />
+                                            <Text fontWeight="medium">{formatTime(booking.appointmentDate)}</Text>
+                                        </Flex>
+
+                                        <Flex align="center" gap={2} flexWrap="wrap" mb={3}>
+                                            <Badge colorPalette={booking.bookingType === 'online' ? 'purple' : 'blue'}>
+                                                {booking.bookingType === 'online' ? 'أونلاين' : 'عيادة'}
+                                            </Badge>
+                                            {booking.visitType && (
+                                                <Text fontSize="xs" color="gray.500">
+                                                    ({visitTypeLabel(booking.visitType as string)})
+                                                </Text>
+                                            )}
+                                        </Flex>
+
+                                        <Box mb={3}>
+                                            <Text fontSize="xs" color="gray.500" mb={1}>حالة الكشف</Text>
+                                            {renderExaminationCell(booking)}
+                                        </Box>
+
+                                        <Box pt={1} borderTopWidth="1px" borderColor="gray.200">
+                                            {renderBookingActions(booking, true)}
+                                        </Box>
+                                    </Card.Body>
+                                </Card.Root>
+                            ))}
+                        </Stack>
+
+                        {/* تابلت وما فوق: جدول مع تمرير أفقي احتياطي */}
+                        <Box
+                            display={{ base: 'none', md: 'block' }}
+                            bg="white"
+                            rounded="2xl"
+                            shadow="sm"
+                            overflow="hidden"
+                        >
+                            <Box overflowX="auto" css={{ WebkitOverflowScrolling: 'touch' }}>
+                                <Table.Root minW="720px" size="sm">
+                                    <Table.Header style={{ backgroundColor: '#fdfbf7' }}>
+                                        <Table.Row>
+                                            <Table.ColumnHeader whiteSpace="nowrap" style={{ padding: '14px 16px', textAlign: 'right' }}>المريض</Table.ColumnHeader>
+                                            <Table.ColumnHeader whiteSpace="nowrap" style={{ padding: '14px 16px', textAlign: 'right' }}>وقت الحجز</Table.ColumnHeader>
+                                            <Table.ColumnHeader whiteSpace="nowrap" style={{ padding: '14px 16px', textAlign: 'right' }}>نوع الكشف</Table.ColumnHeader>
+                                            <Table.ColumnHeader whiteSpace="nowrap" style={{ padding: '14px 16px', textAlign: 'right' }}>حالة الكشف</Table.ColumnHeader>
+                                            <Table.ColumnHeader whiteSpace="nowrap" style={{ padding: '14px 16px', textAlign: 'right' }}>إجراءات</Table.ColumnHeader>
+                                        </Table.Row>
+                                    </Table.Header>
+                                    <Table.Body>
+                                        {filteredBookings.map((booking) => (
+                                            <Table.Row
+                                                key={booking.id}
+                                                style={{ borderBottom: '1px solid #edf2f7', background: getRowBg(booking.examinationStatus) }}
+                                            >
+                                                <Table.Cell style={{ padding: '14px 16px', verticalAlign: 'middle' }}>
+                                                    <Flex align="center" gap={3}>
+                                                        <Avatar.Root size="sm" colorPalette={booking.examinationStatus === 'done' ? 'green' : 'blue'}>
+                                                            <Avatar.Fallback name={booking.customerName} />
+                                                        </Avatar.Root>
+                                                        <Box>
+                                                            <Text fontWeight="bold" fontSize="sm">{booking.customerName}</Text>
+                                                            <Text fontSize="xs" color="gray.500">{booking.customerPhone}</Text>
+                                                        </Box>
+                                                    </Flex>
+                                                </Table.Cell>
+                                                <Table.Cell style={{ padding: '14px 16px', verticalAlign: 'middle' }}>
+                                                    <Flex align="center" gap={2} color="gray.600">
+                                                        <Clock size={16} />
+                                                        <Text fontWeight="medium" fontSize="sm">{formatTime(booking.appointmentDate)}</Text>
+                                                    </Flex>
+                                                </Table.Cell>
+                                                <Table.Cell style={{ padding: '14px 16px', verticalAlign: 'middle' }}>
+                                                    <Badge colorPalette={booking.bookingType === 'online' ? 'purple' : 'blue'}>
+                                                        {booking.bookingType === 'online' ? 'أونلاين' : 'عيادة'}
+                                                    </Badge>
+                                                    {booking.visitType && (
+                                                        <Text as="span" fontSize="xs" color="gray.500" mr={2}>
+                                                            ({visitTypeLabel(booking.visitType as string)})
+                                                        </Text>
+                                                    )}
+                                                </Table.Cell>
+                                                <Table.Cell style={{ padding: '14px 16px', verticalAlign: 'middle' }}>
+                                                    {renderExaminationCell(booking)}
+                                                </Table.Cell>
+                                                <Table.Cell style={{ padding: '14px 16px', verticalAlign: 'middle' }}>
+                                                    {renderBookingActions(booking)}
+                                                </Table.Cell>
+                                            </Table.Row>
+                                        ))}
+                                    </Table.Body>
+                                </Table.Root>
+                            </Box>
+                        </Box>
+                    </>
                 )}
             </Container>
         </Box>

@@ -417,96 +417,80 @@ export default function SlotBookingModal({
                                         )}
                                     </Box>
 
-                                    {/* Not available */}
-                                    {!slotsData?.available && (
-                                        <Box
-                                            bg="orange.50"
-                                            border="1px solid"
-                                            borderColor="orange.200"
-                                            borderRadius="xl"
-                                            p={5}
-                                            textAlign="center"
-                                        >
-                                            <Text fontSize="3xl" mb={2}>⚠️</Text>
-                                            <Text fontWeight="bold" color="orange.700" fontSize="lg">
-                                                {slotsData?.message || "الحجز غير متاح"}
-                                            </Text>
-                                            <Text color="gray.500" fontSize="sm" mt={1}>
-                                                يرجى اختيار يوم آخر
-                                            </Text>
-                                            <Button
-                                                mt={4}
-                                                onClick={() => setStep("date")}
-                                                colorPalette="orange"
-                                                variant="subtle"
+                                    {/* عدم توفر حجز لهذا اليوم أو لا توجد مواعيد */}
+                                    {slotsData != null &&
+                                        (slotsData?.available_slots ?? slotsData?.availableSlots ?? []).length === 0 && (
+                                            <Box
+                                                bg="orange.50"
+                                                border="1px solid"
+                                                borderColor="orange.200"
                                                 borderRadius="xl"
+                                                p={5}
+                                                textAlign="center"
                                             >
-                                                اختر تاريخاً آخر
-                                            </Button>
-                                        </Box>
-                                    )}
+                                                <Text fontSize="3xl" mb={2}>⚠️</Text>
+                                                <Text fontWeight="bold" color="orange.700" fontSize="lg">
+                                                    {slotsData?.message || "لا توجد مواعيد متاحة لهذا اليوم"}
+                                                </Text>
+                                                <Text color="gray.500" fontSize="sm" mt={1}>
+                                                    يرجى اختيار يوم آخر
+                                                </Text>
+                                                <Button
+                                                    mt={4}
+                                                    onClick={() => setStep("date")}
+                                                    colorPalette="orange"
+                                                    variant="subtle"
+                                                    borderRadius="xl"
+                                                >
+                                                    اختر تاريخاً آخر
+                                                </Button>
+                                            </Box>
+                                        )}
 
-                                    {/* Available slots grid */}
-                                    {slotsData?.available && slotsData.slots && (
+                                    {/* شبكة المواعيد المتاحة (available_slots فقط — حجز واحد لكل موعد) */}
+                                    {(slotsData?.available_slots ?? slotsData?.availableSlots ?? []).length > 0 && (
                                         <>
                                             <Text fontSize="sm" color="gray.600" fontWeight="medium">
-                                                اختر الوقت المناسب:
+                                                اختر الوقت المناسب (سلاطات 10 دقائق، حجز واحد لكل موعد):
                                             </Text>
                                             <Box
                                                 display="grid"
                                                 gridTemplateColumns="repeat(3, 1fr)"
                                                 gap={2}
                                             >
-                                                {slotsData.slots.map((slot) => (
-                                                    <Box
-                                                        key={slot.timeSlot}
-                                                        as="button"
-                                                        onClick={() =>
-                                                            slot.available && setSelectedSlot(slot.timeSlot)
-                                                        }
-                                                        p={3}
-                                                        borderRadius="xl"
-                                                        border="2px solid"
-                                                        borderColor={
-                                                            !slot.available
-                                                                ? "red.100"
-                                                                : selectedSlot === slot.timeSlot
-                                                                    ? "#2d6a4f"
-                                                                    : "gray.200"
-                                                        }
-                                                        bg={
-                                                            !slot.available
-                                                                ? "red.50"
-                                                                : selectedSlot === slot.timeSlot
-                                                                    ? "green.50"
-                                                                    : "white"
-                                                        }
-                                                        cursor={slot.available ? "pointer" : "not-allowed"}
-                                                        opacity={slot.available ? 1 : 0.6}
-                                                        _hover={slot.available ? { borderColor: "#2d6a4f", bg: "green.50" } : {}}
-                                                        transition="all 0.15s"
-                                                        textAlign="center"
-                                                    >
-                                                        <Text
-                                                            fontWeight="bold"
-                                                            fontSize="md"
-                                                            color={
-                                                                !slot.available
-                                                                    ? "red.400"
-                                                                    : selectedSlot === slot.timeSlot
-                                                                        ? "#2d6a4f"
-                                                                        : "gray.700"
+                                                {(slotsData?.available_slots ?? slotsData?.availableSlots ?? []).map(
+                                                    (timeSlot) => (
+                                                        <Box
+                                                            key={timeSlot}
+                                                            as="button"
+                                                            onClick={() => setSelectedSlot(timeSlot)}
+                                                            p={3}
+                                                            borderRadius="xl"
+                                                            border="2px solid"
+                                                            borderColor={
+                                                                selectedSlot === timeSlot ? "#2d6a4f" : "gray.200"
                                                             }
+                                                            bg={selectedSlot === timeSlot ? "green.50" : "white"}
+                                                            cursor="pointer"
+                                                            _hover={{ borderColor: "#2d6a4f", bg: "green.50" }}
+                                                            transition="all 0.15s"
+                                                            textAlign="center"
                                                         >
-                                                            {slot.timeSlot}
-                                                        </Text>
-                                                        <Text fontSize="xs" color="gray.400" mt={0.5}>
-                                                            {slot.available
-                                                                ? `${10 - slot.count} مكان`
-                                                                : "ممتلئ"}
-                                                        </Text>
-                                                    </Box>
-                                                ))}
+                                                            <Text
+                                                                fontWeight="bold"
+                                                                fontSize="md"
+                                                                color={
+                                                                    selectedSlot === timeSlot ? "#2d6a4f" : "gray.700"
+                                                                }
+                                                            >
+                                                                {timeSlot}
+                                                            </Text>
+                                                            <Text fontSize="xs" color="gray.400" mt={0.5}>
+                                                                متاح
+                                                            </Text>
+                                                        </Box>
+                                                    )
+                                                )}
                                             </Box>
 
                                             {selectedSlot && (

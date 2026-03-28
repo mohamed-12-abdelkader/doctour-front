@@ -107,8 +107,18 @@ export default function AdminDashboard() {
                 </>
               ) : (
                 <>
-                  <Skeleton height="32px" width="220px" mb={3} borderRadius="md" />
-                  <Skeleton height="20px" width="100%" maxW="320px" borderRadius="md" />
+                  <Skeleton
+                    height="32px"
+                    width="220px"
+                    mb={3}
+                    borderRadius="md"
+                  />
+                  <Skeleton
+                    height="20px"
+                    width="100%"
+                    maxW="320px"
+                    borderRadius="md"
+                  />
                 </>
               )}
             </Box>
@@ -148,13 +158,38 @@ export default function AdminDashboard() {
                     borderColor="gray.100"
                   >
                     <Flex align="start" justify="space-between" gap={4}>
-                      <Skeleton w="52px" h="52px" borderRadius="xl" flexShrink={0} />
+                      <Skeleton
+                        w="52px"
+                        h="52px"
+                        borderRadius="xl"
+                        flexShrink={0}
+                      />
                       <Box flex={1} minW={0}>
-                        <Skeleton height="22px" width="70%" mb={2} borderRadius="md" />
-                        <Skeleton height="16px" width="100%" borderRadius="md" />
-                        <Skeleton height="16px" width="85%" mt={1.5} borderRadius="md" />
+                        <Skeleton
+                          height="22px"
+                          width="70%"
+                          mb={2}
+                          borderRadius="md"
+                        />
+                        <Skeleton
+                          height="16px"
+                          width="100%"
+                          borderRadius="md"
+                        />
+                        <Skeleton
+                          height="16px"
+                          width="85%"
+                          mt={1.5}
+                          borderRadius="md"
+                        />
                       </Box>
-                      <Skeleton w="20px" h="20px" borderRadius="md" flexShrink={0} mt={1} />
+                      <Skeleton
+                        w="20px"
+                        h="20px"
+                        borderRadius="md"
+                        flexShrink={0}
+                        mt={1}
+                      />
                     </Flex>
                   </Box>
                 ))}
@@ -177,12 +212,28 @@ export default function AdminDashboard() {
                     borderColor="gray.100"
                   >
                     <Flex align="start" justify="space-between" gap={4}>
-                      <Skeleton w="52px" h="52px" borderRadius="xl" flexShrink={0} />
+                      <Skeleton
+                        w="52px"
+                        h="52px"
+                        borderRadius="xl"
+                        flexShrink={0}
+                      />
                       <Box flex={1} minW={0}>
-                        <Skeleton height="22px" width="65%" mb={2} borderRadius="md" />
+                        <Skeleton
+                          height="22px"
+                          width="65%"
+                          mb={2}
+                          borderRadius="md"
+                        />
                         <Skeleton height="16px" width="90%" borderRadius="md" />
                       </Box>
-                      <Skeleton w="20px" h="20px" borderRadius="md" flexShrink={0} mt={1} />
+                      <Skeleton
+                        w="20px"
+                        h="20px"
+                        borderRadius="md"
+                        flexShrink={0}
+                        mt={1}
+                      />
                     </Flex>
                   </Box>
                 ))}
@@ -209,117 +260,88 @@ export default function AdminDashboard() {
             </Text>
           </Box>
         )}
-        {mounted && groups.map((group) => (
-          <Box key={group} mb={10}>
-            <Flex align="center" gap={2} mb={5}>
-              <Box w="4px" h="24px" bg="#615b36" borderRadius="full" />
-              <Heading size="md" color="#544f30">
-                {group}
-              </Heading>
-            </Flex>
-            <SimpleGrid columns={{ base: 1, sm: 2, lg: 3 }} gap={5}>
-              {visibleLinks
-                .filter((link) => link.group === group)
-                .map((link) => {
-                  const IconComp = link.icon;
-                  return (
-                    <Box
-                      key={link.href}
-                      as="button"
-                      onClick={() => router.push(link.href)}
-                      cursor="pointer"
-                      w="full"
-                      textAlign="right"
-                      p={6}
-                      bg="white"
-                      borderRadius="xl"
-                      boxShadow="sm"
-                      border="1px solid"
-                      borderColor="gray.100"
-                      transition="all 0.25s ease"
-                      _hover={{
-                        transform: "translateY(-4px)",
-                        boxShadow: "lg",
-                        borderColor: link.color,
-                        bg: link.bg,
-                      }}
-                      _active={{ transform: "translateY(-1px)" }}
-                    >
-                      <Flex align="start" justify="space-between" gap={4}>
-                        <Box
-                          p={3}
-                          borderRadius="xl"
-                          bg={link.bg}
-                          color={link.color}
-                          flexShrink={0}
-                        >
-                          <IconComp size={28} />
-                        </Box>
-                        <Box flex={1} minW={0}>
-                          <Text
-                            fontWeight="bold"
-                            fontSize="lg"
-                            color="#2d3748"
-                            mb={1}
+        {mounted &&
+          groups.map((group) => (
+            <Box key={group} mb={10}>
+              <Flex align="center" gap={2} mb={5}>
+                <Box w="4px" h="24px" bg="#615b36" borderRadius="full" />
+                <Heading size="md" color="#544f30">
+                  {group}
+                </Heading>
+              </Flex>
+              <SimpleGrid columns={{ base: 1, sm: 2, lg: 3 }} gap={5}>
+                {visibleLinks
+                  .filter((link) => link.group === group)
+                  .map((link) => {
+                    const IconComp = link.icon;
+                    return (
+                      <Box
+                        key={link.href}
+                        as="button"
+                        onClick={() => router.push(link.href)}
+                        cursor="pointer"
+                        w="full"
+                        textAlign="right"
+                        p={6}
+                        bg="white"
+                        borderRadius="xl"
+                        boxShadow="sm"
+                        border="1px solid"
+                        borderColor="gray.100"
+                        transition="all 0.25s ease"
+                        _hover={{
+                          transform: "translateY(-4px)",
+                          boxShadow: "lg",
+                          borderColor: link.color,
+                          bg: link.bg,
+                        }}
+                        _active={{ transform: "translateY(-1px)" }}
+                      >
+                        <Flex align="start" justify="space-between" gap={4}>
+                          <Box
+                            p={3}
+                            borderRadius="xl"
+                            bg={link.bg}
+                            color={link.color}
+                            flexShrink={0}
                           >
-                            {link.title}
-                          </Text>
-                          <Text
-                            fontSize="sm"
-                            color="gray.500"
-                            lineHeight="tall"
-                            noOfLines={2}
+                            <IconComp size={28} />
+                          </Box>
+                          <Box flex={1} minW={0}>
+                            <Text
+                              fontWeight="bold"
+                              fontSize="lg"
+                              color="#2d3748"
+                              mb={1}
+                            >
+                              {link.title}
+                            </Text>
+                            <Text
+                              fontSize="sm"
+                              color="gray.500"
+                              lineHeight="tall"
+                              noOfLines={2}
+                            >
+                              {link.description}
+                            </Text>
+                          </Box>
+                          <Box
+                            color={link.color}
+                            opacity={0.8}
+                            _groupHover={{ transform: "translateX(-4px)" }}
+                            transition="transform 0.2s"
+                            flexShrink={0}
+                            mt={1}
                           >
-                            {link.description}
-                          </Text>
-                        </Box>
-                        <Box
-                          color={link.color}
-                          opacity={0.8}
-                          _groupHover={{ transform: "translateX(-4px)" }}
-                          transition="transform 0.2s"
-                          flexShrink={0}
-                          mt={1}
-                        >
-                          <ChevronLeft size={20} />
-                        </Box>
-                      </Flex>
-                    </Box>
-                  );
-                })}
-            </SimpleGrid>
-          </Box>
-        ))}
-
-        {/* Seed hint - optional */}
-        <Box
-          mt={8}
-          p={4}
-          bg="orange.50"
-          borderRadius="xl"
-          border="1px solid"
-          borderColor="orange.100"
-        >
-          <Text fontSize="sm" color="orange.800">
-            <Text as="span" fontWeight="bold">
-              ملاحظة:
-            </Text>{" "}
-            في حال الحاجة لتهيئة قاعدة البيانات، يمكنك تشغيل{" "}
-            <Text
-              as="a"
-              href="/api/seed"
-              target="_blank"
-              rel="noopener"
-              color="orange.600"
-              textDecoration="underline"
-              _hover={{ color: "orange.700" }}
-              fontWeight="bold"
-            >
-              نقطة الـ seed
-            </Text>
-            .
-          </Text>
-        </Box>
+                            <ChevronLeft size={20} />
+                          </Box>
+                        </Flex>
+                      </Box>
+                    );
+                  })}
+              </SimpleGrid>
+            </Box>
+          ))}
       </Container>
     </Box>
   );

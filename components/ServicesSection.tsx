@@ -12,24 +12,9 @@ import {
 import { MotionBox, fadeInUp } from "./MotionBox";
 import { ArrowLeft } from "lucide-react";
 import { AnimatePresence } from "framer-motion";
+import { BOOKING_SERVICES } from "@/data/services";
 
 const BRAND = "#5d562c";
-
-const SERVICES_LIST = [
-  "Botox",
-  "filler",
-  "تنعيم علاجي للشعر",
-  "Skin booster",
-  "جلسة أوكسجينو",
-  "تقشير بارد",
-  "تقشير كيميائي",
-  "ديرما بن بلازما أو ميزو",
-  "جلسة تساقط الشعر",
-  "إزالة الزوائد الجلدية",
-  "توريد علاجي للشفايف",
-  "تنضيف بشرة Basic",
-  "تنضيف بشرة عميق",
-];
 
 export default function ServicesSection() {
   return (
@@ -96,7 +81,7 @@ export default function ServicesSection() {
                 }}
                 gap={{ base: 4, md: 6, lg: 8 }}
               >
-                {SERVICES_LIST.map((name, index) => (
+                {BOOKING_SERVICES.map((name, index) => (
                   <MotionBox
                     key={name}
                     variants={fadeInUp}

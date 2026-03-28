@@ -4,11 +4,11 @@ import {
     Box, Container, Flex, Heading, Text, Button, Badge, Spinner, Card, Stack, SimpleGrid,
     Dialog, Input, Textarea, IconButton, useDisclosure, Avatar, Separator,
 } from '@chakra-ui/react'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import {
     ArrowRight, Calendar, Phone, DollarSign, Clock, FileText,
-    Plus, Trash2, Activity, ImagePlus, X, ExternalLink, Edit2, AlertTriangle,
+    Plus, Trash2, Activity, ImagePlus, X, ExternalLink, Edit2, AlertTriangle, Camera, Upload,
 } from 'lucide-react'
 import {
     BookingHistoryResponse, Booking, BookingStatus, VisitType,
@@ -16,6 +16,7 @@ import {
 } from '@/types/booking'
 import api from '@/lib/axios'
 import { toaster } from '@/components/ui/toaster'
+import { isSuperAdminUser } from '@/lib/admin-nav'
 
 function getIsAdmin(): boolean {
     if (typeof document === 'undefined') return false
@@ -37,6 +38,8 @@ export default function PatientHistoryPage() {
     const [data, setData] = useState<BookingHistoryResponse | null>(null)
     const [isLoading, setIsLoading] = useState(true)
     const [isAdmin, setIsAdmin] = useState(false)
+    /** زر «تقرير جديد»: يظهر فقط لـ role=admin و permissions=[] (سوبر أدمن) */
+    const [canCreateNewReport, setCanCreateNewReport] = useState(false)
 
     // ── Report modal ──────────────────────────────────────────────────────────
     const { open: isReportOpen, onOpen: onReportOpen, onClose: onReportClose } = useDisclosure()
@@ -51,6 +54,8 @@ export default function PatientHistoryPage() {
     const [prescriptionFile, setPrescriptionFile] = useState<File | null>(null)
     const [prescriptionPreview, setPrescriptionPreview] = useState<string | null>(null)
     const [existingPrescriptionUrl, setExistingPrescriptionUrl] = useState<string | null>(null)
+    const prescriptionGalleryInputRef = useRef<HTMLInputElement>(null)
+    const prescriptionCameraInputRef = useRef<HTMLInputElement>(null)
 
     // ── Delete confirm modal ──────────────────────────────────────────────────
     const { open: isDeleteOpen, onOpen: onDeleteOpen, onClose: onDeleteClose } = useDisclosure()
@@ -59,7 +64,10 @@ export default function PatientHistoryPage() {
 
     // ── Init ──────────────────────────────────────────────────────────────────
     useEffect(() => { if (id) fetchPatientHistory() }, [id])
-    useEffect(() => { setIsAdmin(getIsAdmin()) }, [])
+    useEffect(() => {
+        setIsAdmin(getIsAdmin())
+        setCanCreateNewReport(isSuperAdminUser())
+    }, [])
 
     const fetchPatientHistory = async () => {
         if (!id) return
@@ -132,6 +140,19 @@ export default function PatientHistoryPage() {
         } else {
             setPrescriptionPreview('pdf')
         }
+    }
+
+    const onPrescriptionInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const f = e.target.files?.[0] ?? null
+        handleFileChange(f)
+        e.target.value = ''
+    }
+
+    const onDropPrescription = (e: React.DragEvent) => {
+        e.preventDefault()
+        e.stopPropagation()
+        const f = e.dataTransfer.files?.[0]
+        if (f) handleFileChange(f)
     }
 
     // ── Save report ───────────────────────────────────────────────────────────
@@ -467,7 +488,7 @@ export default function PatientHistoryPage() {
                                             <Badge colorPalette="gray" variant="subtle" borderRadius="full" px={2}>{currentReports.length}</Badge>
                                         )}
                                     </Heading>
-                                    {isAdmin && (
+                                    {canCreateNewReport && (
                                         <Button
                                             size="sm" bg="#615b36" color="white" _hover={{ bg: '#4a452a' }}
                                             onClick={openNewReportModal}
@@ -497,7 +518,7 @@ export default function PatientHistoryPage() {
                                     <Box py={8} textAlign="center" bg="gray.50" borderRadius="lg">
                                         <FileText size={40} color="#cbd5e0" style={{ margin: '0 auto 8px' }} />
                                         <Text color="gray.500" fontSize="sm">لا توجد تقارير لهذه الزيارة</Text>
-                                        {isAdmin && (
+                                        {canCreateNewReport && (
                                             <Button size="sm" mt={3} variant="outline" colorPalette="blue" onClick={openNewReportModal}>
                                                 <Plus size={14} /> إضافة تقرير
                                             </Button>
@@ -633,8 +654,48 @@ export default function PatientHistoryPage() {
                                 <Box>
                                     <Text fontSize="sm" fontWeight="medium" color="gray.600" mb={1}>
                                         صورة الروشتة
-                                        <Text as="span" fontSize="xs" color="gray.400" mr={2}>(اختياري — JPEG / PNG / WEBP / PDF — حتى 5 MB)</Text>
+                                        <Text as="span" fontSize="xs" color="gray.400" mr={2} display="block" mt={1}>
+                                            اختياري — من المعرض أو PDF، أو التقاط صورة بالكاميرا — حتى 5 MB
+                                        </Text>
                                     </Text>
+
+                                    <Flex gap={2} flexWrap="wrap" mb={3}>
+                                        <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="outline"
+                                            colorPalette="gray"
+                                            onClick={() => prescriptionGalleryInputRef.current?.click()}
+                                        >
+                                            <Upload size={16} />
+                                            رفع من الجهاز
+                                        </Button>
+                                        <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="outline"
+                                            colorPalette="blue"
+                                            onClick={() => prescriptionCameraInputRef.current?.click()}
+                                        >
+                                            <Camera size={16} />
+                                            التقاط بالكاميرا
+                                        </Button>
+                                        <input
+                                            ref={prescriptionGalleryInputRef}
+                                            type="file"
+                                            accept="image/jpeg,image/png,image/webp,application/pdf"
+                                            style={{ display: 'none' }}
+                                            onChange={onPrescriptionInputChange}
+                                        />
+                                        <input
+                                            ref={prescriptionCameraInputRef}
+                                            type="file"
+                                            accept="image/*"
+                                            capture="environment"
+                                            style={{ display: 'none' }}
+                                            onChange={onPrescriptionInputChange}
+                                        />
+                                    </Flex>
 
                                     {/* Existing image preview */}
                                     {existingPrescriptionUrl && !prescriptionFile && (
@@ -685,29 +746,26 @@ export default function PatientHistoryPage() {
                                         </Flex>
                                     )}
 
-                                    {/* Drop zone */}
+                                    {/* سحب وإفلات */}
                                     <Box
-                                        as="label" htmlFor="prescription-upload"
+                                        onDragOver={e => { e.preventDefault(); e.stopPropagation() }}
+                                        onDrop={onDropPrescription}
                                         display="flex" flexDirection="column" alignItems="center" justifyContent="center"
                                         gap={2} p={5} borderRadius="xl" border="2px dashed"
                                         borderColor={prescriptionFile ? '#615b36' : 'gray.300'}
                                         bg={prescriptionFile ? '#fdfbf7' : 'gray.50'}
                                         cursor="pointer" transition="all 0.2s"
+                                        onClick={() => prescriptionGalleryInputRef.current?.click()}
                                         _hover={{ borderColor: '#615b36', bg: '#fdfbf7' }}
                                     >
                                         <ImagePlus size={26} color={prescriptionFile ? '#615b36' : '#a0aec0'} />
                                         <Text fontSize="sm" color={prescriptionFile ? '#615b36' : 'gray.500'} fontWeight="medium" textAlign="center">
-                                            {prescriptionFile ? prescriptionFile.name : 'اضغط لرفع صورة الروشتة'}
+                                            {prescriptionFile ? prescriptionFile.name : 'اسحب الملف هنا أو اضغط للاختيار من الجهاز'}
                                         </Text>
                                         {prescriptionFile
                                             ? <Text fontSize="xs" color="green.500">✓ تم اختيار الملف</Text>
-                                            : <Text fontSize="xs" color="gray.400">أو اسحب الملف هنا</Text>
+                                            : <Text fontSize="xs" color="gray.400">صور أو PDF</Text>
                                         }
-                                        <input id="prescription-upload" type="file"
-                                            accept="image/jpeg,image/png,image/webp,application/pdf"
-                                            style={{ display: 'none' }}
-                                            onChange={e => handleFileChange(e.target.files?.[0] ?? null)}
-                                        />
                                     </Box>
                                 </Box>
 

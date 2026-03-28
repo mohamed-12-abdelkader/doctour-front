@@ -1,13 +1,14 @@
 'use client'
 
 import {
-    Box, Container, Flex, Heading, Text, Button, Badge, Table, IconButton, HStack, Input, SimpleGrid, Spinner, Dialog, Portal, Card
+    Box, Container, Flex, Heading, Text, Button, Badge, Table, IconButton, HStack, Input, SimpleGrid, Spinner, Dialog, Portal, Card, VStack, Stack,
 } from '@chakra-ui/react'
-import { useState, useMemo, useEffect, useCallback } from 'react'
+import { useState, useMemo, useEffect, useCallback, type ReactNode } from 'react'
 import { Booking, BookingStatus } from '@/types/booking'
-import { Globe, User, Search, AlertCircle, CheckCircle2, XCircle, ChevronLeft, ChevronRight, Clock } from 'lucide-react'
+import { Globe, User, Search, AlertCircle, CheckCircle2, XCircle, ChevronLeft, ChevronRight, Clock, Phone, Mail, CalendarDays, Sparkles } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import api from '@/lib/axios'
+import { toaster } from '@/components/ui/toaster'
 
 const MotionRow = motion(Table.Row)
 
@@ -27,6 +28,28 @@ function buildCalendarDays(year: number, month: number): (Date | null)[] {
 }
 
 const AR_WEEKDAYS = ['السبت', 'الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة']
+
+/** ألوان الهوية — متناسقة مع باقي لوحة التحكم */
+const BRAND = {
+    primary: '#6f6a40',
+    primaryMuted: '#85805a',
+    surface: '#faf9f6',
+    cardBorder: 'rgba(111, 106, 64, 0.12)',
+    gradient: 'linear-gradient(135deg, #6f6a40 0%, #8a8460 50%, #6f6a40 100%)',
+}
+
+/** تاريخ مفضل من الحجز → YYYY-MM-DD للـ available-slots */
+function preferredDateToYMD(preferredDate: string | null | undefined, fallback: string): string {
+    if (!preferredDate) return fallback
+    if (/^\d{4}-\d{2}-\d{2}/.test(preferredDate)) return preferredDate.slice(0, 10)
+    try {
+        const d = new Date(preferredDate)
+        if (!Number.isNaN(d.getTime())) {
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+        }
+    } catch { /* empty */ }
+    return fallback
+}
 
 /** تحويل وقت بصيغة 24 ساعة (مثل "13:00") إلى عرض عادي 12 ساعة (مثل "1:00 م") */
 function formatTime12(timeStr: string): string {
@@ -61,10 +84,13 @@ export default function OnlineBookingsPage() {
         customerName: string
     } | null>(null)
 
-    // We can use a toast or just simple alerts. Chakra v3 usually has a toast provider, 
-    // but the file didn't have one setup explicitly. We'll use simple alerts or console for errors 
-    // to be safe, or just conditional rendering of error states. 
-    // Actually, let's keep it simple with console errors for now as the user didn't ask for error UI.
+    /** مودال تأكيد حجز أونلاين — يتطلب date + time من available_slots (الـ API doc) */
+    const [confirmOnlineId, setConfirmOnlineId] = useState<string | number | null>(null)
+    const [confirmDate, setConfirmDate] = useState('')
+    const [confirmTime, setConfirmTime] = useState('')
+    const [availableSlots, setAvailableSlots] = useState<string[]>([])
+    const [loadingSlots, setLoadingSlots] = useState(false)
+    const [submittingConfirm, setSubmittingConfirm] = useState(false)
 
     const calYear = calViewDate.getFullYear()
     const calMonth = calViewDate.getMonth()
@@ -97,6 +123,36 @@ export default function OnlineBookingsPage() {
     useEffect(() => {
         fetchBookings()
     }, [fetchBookings])
+
+    // جلب المواعيد المتاحة عند اختيار تاريخ في مودال التأكيد
+    useEffect(() => {
+        if (!confirmOnlineId || !confirmDate) {
+            setAvailableSlots([])
+            return
+        }
+        let cancelled = false
+        const run = async () => {
+            setLoadingSlots(true)
+            setAvailableSlots([])
+            try {
+                const res = await api.get('/bookings/available-slots', { params: { date: confirmDate } })
+                const slots = res.data?.available_slots ?? res.data?.availableSlots ?? []
+                if (!cancelled) setAvailableSlots(Array.isArray(slots) ? slots : [])
+            } catch {
+                if (!cancelled) setAvailableSlots([])
+            } finally {
+                if (!cancelled) setLoadingSlots(false)
+            }
+        }
+        run()
+        return () => { cancelled = true }
+    }, [confirmOnlineId, confirmDate])
+
+    // عند تغيير التاريخ في مودال التأكيد، إعادة اختيار الوقت (السلاطات تخص اليوم)
+    useEffect(() => {
+        if (!confirmOnlineId) return
+        setConfirmTime('')
+    }, [confirmDate, confirmOnlineId])
 
     // Stats calculation based on the CURRENT fetched/filtered list? 
     // Usually stats count *all* bookings. The API might need a separate stats endpoint or we just count what we have.
@@ -148,11 +204,13 @@ export default function OnlineBookingsPage() {
         })
     }, [bookings, searchQuery])
 
-    const updateBookingStatus = async (id: string | number, newStatus: BookingStatus) => {
-        try {
-            const { data } = await api.patch(`/bookings/online/${id}/status`, { status: newStatus })
+    type PatchOnlineBody = { status: BookingStatus; date?: string; time?: string }
 
-            // استبدال الحجز بالبيانات المحدثة من الـ API (الـ booking قد يحتوي appointmentDate وغيره)
+    const patchOnlineStatus = async (id: string | number, body: PatchOnlineBody) => {
+        const newStatus = body.status
+        try {
+            const { data } = await api.patch(`/bookings/online/${id}/status`, body)
+
             const updated = data?.booking ?? data
             if (updated && typeof updated === 'object') {
                 setBookings(prev => prev.map(b =>
@@ -164,7 +222,6 @@ export default function OnlineBookingsPage() {
                 ))
             }
 
-            // عند التأكيد: إظهار مودال الموعد المتوقع للكشف
             if (newStatus === 'confirmed' && data?.expectedExaminationTime != null) {
                 setConfirmResult({
                     expectedExaminationTime: data.expectedExaminationTime ?? '',
@@ -174,14 +231,53 @@ export default function OnlineBookingsPage() {
                     customerName: data.booking?.customerName ?? data.customerName ?? 'العميل',
                 })
             }
-        } catch (error) {
-            console.error(`Failed to update booking ${id} to ${newStatus}`, error)
-            alert('فشل تحديث حالة الحجز')
+        } catch (error: any) {
+            console.error(`Failed to update booking ${id}`, error)
+            const msg = error.response?.data?.message || 'فشل تحديث حالة الحجز'
+            const extraSlots = error.response?.data?.available_slots
+            toaster.create({
+                title: 'خطأ في التحديث',
+                description: extraSlots && Array.isArray(extraSlots)
+                    ? `${msg} — المواعيد المتاحة: ${extraSlots.join(', ')}`
+                    : msg,
+                type: 'error',
+                duration: 5000,
+            })
             fetchBookings()
+            throw error
         }
     }
 
-    const handleConfirm = (id: string | number) => updateBookingStatus(id, 'confirmed')
+    const updateBookingStatus = async (id: string | number, newStatus: BookingStatus) => {
+        await patchOnlineStatus(id, { status: newStatus })
+    }
+
+    const submitOnlineConfirm = async () => {
+        if (!confirmOnlineId || !confirmDate || !confirmTime) {
+            toaster.create({
+                title: 'بيانات ناقصة',
+                description: 'اختر التاريخ والوقت من المواعيد المتاحة (سلاطات 10 دقائق).',
+                type: 'error',
+                duration: 3000,
+            })
+            return
+        }
+        setSubmittingConfirm(true)
+        try {
+            await patchOnlineStatus(confirmOnlineId, {
+                status: 'confirmed',
+                date: confirmDate,
+                time: confirmTime,
+            })
+            setConfirmOnlineId(null)
+            setConfirmTime('')
+            toaster.create({ title: 'تم تأكيد الحجز', type: 'success', duration: 2000 })
+        } catch {
+            /* toaster في patchOnlineStatus */
+        } finally {
+            setSubmittingConfirm(false)
+        }
+    }
 
     const handleCancel = (id: string | number) => {
         setCancelId(id);
@@ -196,21 +292,28 @@ export default function OnlineBookingsPage() {
 
     const handleStatusChange = (id: string | number, newStatus: BookingStatus) => {
         if (newStatus === 'cancelled') {
-            // Show confirmation modal for cancellation
-            setCancelId(id);
-        } else {
-            // Directly update for other statuses
-            updateBookingStatus(id, newStatus);
+            setCancelId(id)
+            return
         }
+        if (newStatus === 'confirmed') {
+            const booking = bookings.find(b => b.id === id)
+            setConfirmDate(preferredDateToYMD(booking?.preferredDate, todayStr()))
+            setConfirmTime('')
+            setConfirmOnlineId(id)
+            return
+        }
+        updateBookingStatus(id, newStatus)
     }
 
     const getStatusBadge = (status: string) => {
+        const base = { px: 2.5, py: 1, borderRadius: 'full', fontWeight: 'semibold', fontSize: 'xs' as const }
         switch (status) {
-            case 'confirmed': return <Badge colorPalette="green" variant="subtle" px={2} py={1}>مؤكد</Badge>
-            case 'completed': return <Badge colorPalette="blue" variant="subtle" px={2} py={1}>مكتمل</Badge>
-            case 'cancelled': return <Badge colorPalette="red" variant="subtle" px={2} py={1}>ملغي</Badge>
-            case 'pending': return <Badge colorPalette="orange" variant="subtle" px={2} py={1}>قيد الانتظار</Badge>
-            default: return <Badge colorPalette="gray">{status}</Badge>
+            case 'confirmed': return <Badge {...base} colorPalette="green" variant="subtle">مؤكد</Badge>
+            case 'completed': return <Badge {...base} colorPalette="blue" variant="subtle">مكتمل</Badge>
+            case 'cancelled': return <Badge {...base} colorPalette="red" variant="subtle">ملغي</Badge>
+            case 'rejected': return <Badge {...base} colorPalette="red" variant="outline">مرفوض</Badge>
+            case 'pending': return <Badge {...base} colorPalette="orange" variant="subtle">قيد الانتظار</Badge>
+            default: return <Badge {...base} colorPalette="gray">{status}</Badge>
         }
     }
 
@@ -228,89 +331,236 @@ export default function OnlineBookingsPage() {
         return 'لم يحدد بعد'
     }
 
-    return (
-        <Box minH="100vh" bg="#f8fafc" dir="rtl">
-            <Container maxW="8xl" py={8}>
+    /** قائمة تحديث الحالة — مشتركة بين الجدول والبطاقة */
+    const bookingStatusSelect = (booking: Booking, fullWidth?: boolean) => (
+        <select
+            value={confirmOnlineId === booking.id ? 'pending' : booking.status}
+            onChange={(e) => handleStatusChange(booking.id, e.target.value as BookingStatus)}
+            style={{
+                padding: '10px 12px',
+                borderRadius: '10px',
+                border: `1px solid ${BRAND.cardBorder}`,
+                backgroundColor: '#fafaf8',
+                fontSize: '14px',
+                minWidth: fullWidth ? undefined : 140,
+                width: fullWidth ? '100%' : 'auto',
+                maxWidth: '100%',
+                cursor: 'pointer',
+                color: '#334155',
+                fontWeight: 500,
+            }}
+        >
+            <option value="pending">قيد الانتظار</option>
+            <option value="confirmed">مؤكد</option>
+            <option value="rejected">مرفوض</option>
+            <option value="cancelled">ملغي</option>
+        </select>
+    )
 
-                {/* Header & Title */}
-                <Flex justify="space-between" align="center" mb={8} flexWrap="wrap" gap={4}>
+    const statCard = (opts: {
+        label: string
+        sub: string
+        value: number
+        accent: string
+        iconBg: string
+        iconColor: string
+        icon: ReactNode
+    }) => (
+        <Card.Root
+            position="relative"
+            bg="white"
+            shadow="sm"
+            borderRadius="2xl"
+            overflow="hidden"
+            borderWidth="1px"
+            borderColor={BRAND.cardBorder}
+            transition="transform 0.2s ease, box-shadow 0.2s ease"
+            _hover={{ shadow: 'md', transform: 'translateY(-2px)' }}
+        >
+            <Box position="absolute" insetInlineEnd={0} top={0} w="100%" h="3px" bg={opts.accent} />
+            <Card.Body p={{ base: 5, md: 6 }} pt={6}>
+                <Flex justify="space-between" align="flex-start" gap={3} mb={3}>
                     <Box>
-                        <Heading size="2xl" color="#1e293b" mb={2} letterSpacing="tight">
-                            حجوزات الأونلاين
-                        </Heading>
-                        {/* @ts-ignore */}
-                        <Text color="gray.500" display="flex" align="center" gap={2} fontSize="lg">
-                            <Globe size={20} />
-                            إدارة طلبات الحجز القادمة من الموقع الإلكتروني
+                        <Text color="gray.500" fontWeight="medium" fontSize="sm">
+                            {opts.label}
+                        </Text>
+                        <Text fontSize={{ base: '2xl', md: '3xl' }} fontWeight="bold" color="gray.800" letterSpacing="tight">
+                            {opts.value}
                         </Text>
                     </Box>
+                    <Flex
+                        align="center"
+                        justify="center"
+                        w={11}
+                        h={11}
+                        borderRadius="xl"
+                        bg={opts.iconBg}
+                        color={opts.iconColor}
+                        flexShrink={0}
+                    >
+                        {opts.icon}
+                    </Flex>
                 </Flex>
+                <Text fontSize="xs" color="gray.400">
+                    {opts.sub}
+                </Text>
+            </Card.Body>
+        </Card.Root>
+    )
 
-                {/* Stats Cards - Note: These now reflect the FETCHED data */}
-                <SimpleGrid columns={{ base: 1, md: 2, lg: 4 }} gap={6} mb={8}>
-                    <Box bg="white" p={6} rounded="2xl" shadow="sm" border="1px solid" borderColor="orange.100" position="relative" overflow="hidden">
-                        <Box position="absolute" left={0} top={0} w="4px" h="full" bg="orange.400" />
-                        <Flex justify="space-between" align="center" mb={2}>
-                            <Text color="gray.500" fontWeight="medium">قيد الانتظار</Text>
-                            <Box p={2} bg="orange.50" rounded="lg" color="orange.500"><AlertCircle size={20} /></Box>
-                        </Flex>
-                        <Text fontSize="3xl" fontWeight="bold" color="gray.800">{stats.pending}</Text>
-                        <Text fontSize="sm" color="gray.400">طلبات تحتاج مراجعة</Text>
-                    </Box>
+    return (
+        <Box
+            minH="100vh"
+            dir="rtl"
+            bgGradient="linear(to-b, #f5f3eb 0%, #f1f5f9 35%, #f8fafc 100%)"
+        >
+            <Container maxW="8xl" py={{ base: 4, sm: 6, md: 10 }} px={{ base: 3, sm: 4, md: 6 }}>
 
-                    <Box bg="white" p={6} rounded="2xl" shadow="sm" border="1px solid" borderColor="green.100" position="relative" overflow="hidden">
-                        <Box position="absolute" left={0} top={0} w="4px" h="full" bg="green.400" />
-                        <Flex justify="space-between" align="center" mb={2}>
-                            <Text color="gray.500" fontWeight="medium">تم التأكيد</Text>
-                            <Box p={2} bg="green.50" rounded="lg" color="green.500"><CheckCircle2 size={20} /></Box>
+                {/* رأس الصفحة */}
+                <Box
+                    mb={{ base: 8, md: 10 }}
+                    p={{ base: 5, md: 8 }}
+                    borderRadius="3xl"
+                    bg={BRAND.gradient}
+                    color="white"
+                    position="relative"
+                    overflow="hidden"
+                    shadow="lg"
+                >
+                    <Box
+                        position="absolute"
+                        inset={0}
+                        opacity={0.15}
+                        bgImage="radial-gradient(circle at 20% 50%, white 0%, transparent 55%)"
+                        pointerEvents="none"
+                    />
+                    <Flex
+                        direction={{ base: 'column', md: 'row' }}
+                        align={{ base: 'flex-start', md: 'center' }}
+                        justify="space-between"
+                        gap={4}
+                        position="relative"
+                    >
+                        <Flex align="flex-start" gap={4}>
+                            <Flex
+                                align="center"
+                                justify="center"
+                                w={{ base: 12, md: 14 }}
+                                h={{ base: 12, md: 14 }}
+                                borderRadius="2xl"
+                                bg="whiteAlpha.200"
+                                backdropFilter="blur(8px)"
+                            >
+                                <Globe size={28} strokeWidth={1.75} />
+                            </Flex>
+                            <Box>
+                                <Flex align="center" gap={2} mb={2} flexWrap="wrap">
+                                    <Heading size={{ base: 'xl', md: '2xl' }} fontWeight="bold" letterSpacing="tight">
+                                        حجوزات الأونلاين
+                                    </Heading>
+                                    <Badge
+                                        bg="whiteAlpha.300"
+                                        color="white"
+                                        borderRadius="full"
+                                        px={3}
+                                        py={0.5}
+                                        fontSize="xs"
+                                        fontWeight="semibold"
+                                    >
+                                        <Sparkles size={12} style={{ display: 'inline', marginLeft: 4 }} />
+                                        من الموقع
+                                    </Badge>
+                                </Flex>
+                                <Text color="whiteAlpha.900" fontSize={{ base: 'sm', md: 'md' }} maxW="lg" lineHeight="tall">
+                                    راجع طلبات الحجز، وحدّث الحالة، وأكّد الموعد من السلاطات المتاحة.
+                                </Text>
+                            </Box>
                         </Flex>
-                        <Text fontSize="3xl" fontWeight="bold" color="gray.800">{stats.confirmed}</Text>
-                        <Text fontSize="sm" color="gray.400">حجوزات نشطة</Text>
-                    </Box>
+                    </Flex>
+                </Box>
 
-                    <Box bg="white" p={6} rounded="2xl" shadow="sm" border="1px solid" borderColor="red.100" position="relative" overflow="hidden">
-                        <Box position="absolute" left={0} top={0} w="4px" h="full" bg="red.400" />
-                        <Flex justify="space-between" align="center" mb={2}>
-                            <Text color="gray.500" fontWeight="medium">ملغية</Text>
-                            <Box p={2} bg="red.50" rounded="lg" color="red.500"><XCircle size={20} /></Box>
-                        </Flex>
-                        <Text fontSize="3xl" fontWeight="bold" color="gray.800">{stats.cancelled}</Text>
-                        <Text fontSize="sm" color="gray.400">حجوزات مرفوضة</Text>
-                    </Box>
-
-                    <Box bg="white" p={6} rounded="2xl" shadow="sm" border="1px solid" borderColor="blue.100" position="relative" overflow="hidden">
-                        <Box position="absolute" left={0} top={0} w="4px" h="full" bg="blue.400" />
-                        <Flex justify="space-between" align="center" mb={2}>
-                            <Text color="gray.500" fontWeight="medium">العدد المعروض</Text>
-                            <Box p={2} bg="blue.50" rounded="lg" color="blue.500"><User size={20} /></Box>
-                        </Flex>
-                        <Text fontSize="3xl" fontWeight="bold" color="gray.800">{stats.total}</Text>
-                        <Text fontSize="sm" color="gray.400">بناءً على التصفية</Text>
-                    </Box>
+                {/* إحصائيات القائمة الحالية */}
+                <SimpleGrid columns={{ base: 1, sm: 2, lg: 4 }} gap={{ base: 4, md: 6 }} mb={{ base: 6, md: 8 }}>
+                    {statCard({
+                        label: 'قيد الانتظار',
+                        sub: 'طلبات تحتاج مراجعة',
+                        value: stats.pending,
+                        accent: 'orange.400',
+                        iconBg: 'orange.50',
+                        iconColor: 'orange.600',
+                        icon: <AlertCircle size={22} />,
+                    })}
+                    {statCard({
+                        label: 'تم التأكيد',
+                        sub: 'حجوزات مفعّلة',
+                        value: stats.confirmed,
+                        accent: 'green.400',
+                        iconBg: 'green.50',
+                        iconColor: 'green.600',
+                        icon: <CheckCircle2 size={22} />,
+                    })}
+                    {statCard({
+                        label: 'ملغاة',
+                        sub: 'طلبات أُلغيت',
+                        value: stats.cancelled,
+                        accent: 'red.400',
+                        iconBg: 'red.50',
+                        iconColor: 'red.600',
+                        icon: <XCircle size={22} />,
+                    })}
+                    {statCard({
+                        label: 'العدد المعروض',
+                        sub: 'حسب التصفية الحالية',
+                        value: stats.total,
+                        accent: BRAND.primary,
+                        iconBg: 'blue.50',
+                        iconColor: 'blue.600',
+                        icon: <User size={22} />,
+                    })}
                 </SimpleGrid>
 
-                {/* Filters & Search */}
-                <Flex gap={4} mb={6} flexWrap="wrap" align="flex-start">
-                    <Box position="relative" flex={1} minW={{ base: '100%', md: '280px' }} maxW={{ md: "400px" }}>
+                {/* تصفية وبحث */}
+                <Card.Root
+                    mb={6}
+                    bg="white"
+                    borderRadius="2xl"
+                    shadow="sm"
+                    borderWidth="1px"
+                    borderColor={BRAND.cardBorder}
+                    overflow="hidden"
+                >
+                    <Box px={{ base: 4, md: 6 }} py={4} borderBottom="1px solid" borderColor="gray.100" bg={BRAND.surface}>
+                        <Text fontWeight="semibold" color="gray.700" fontSize="sm">
+                            تصفية الطلبات
+                        </Text>
+                        <Text fontSize="xs" color="gray.500" mt={0.5}>
+                            اختر التاريخ من التقويم، ثم حالة الطلب أو ابحث بالاسم / الهاتف
+                        </Text>
+                    </Box>
+                    <Card.Body p={{ base: 4, md: 5 }}>
+                <Flex gap={4} flexWrap="wrap" align="flex-start">
+                    <Box position="relative" flex={1} minW={{ base: '100%', md: '260px' }} maxW={{ md: '420px' }}>
                         <Input
-                            placeholder="بحث باسم المريض أو رقم الهاتف..."
-                            bg="white"
+                            placeholder="بحث بالاسم أو رقم الهاتف..."
+                            bg="gray.50"
                             border="1px solid"
                             borderColor="gray.200"
-                            rounded="lg"
-                            h="45px"
-                            pr={10}
+                            rounded="xl"
+                            h="48px"
+                            pr={11}
+                            fontSize="sm"
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            _focus={{ borderColor: "purple.400", shadow: "0 0 0 1px var(--chakra-colors-purple-400)" }}
+                            _focus={{ borderColor: BRAND.primary, boxShadow: `0 0 0 1px ${BRAND.primary}`, bg: 'white' }}
+                            _hover={{ borderColor: 'gray.300' }}
                         />
-                        <Box position="absolute" right={3} top="50%" transform="translateY(-50%)" color="gray.400">
+                        <Flex position="absolute" right={3} top="50%" transform="translateY(-50%)" color="gray.400" pointerEvents="none">
                             <Search size={18} />
-                        </Box>
+                        </Flex>
                     </Box>
-                    {/* Calendar picker */}
-                    <Card.Root bg="white" shadow="sm" borderRadius="2xl" overflow="hidden" border="1px solid" borderColor="gray.100" flexShrink={0}>
-                        <Box bg="linear-gradient(135deg, #6f6a40 0%, #85805a 100%)" px={4} py={2.5}>
+                    {/* التقويم */}
+                    <Card.Root bg="white" shadow="none" borderRadius="2xl" overflow="hidden" borderWidth="1px" borderColor={BRAND.cardBorder} flexShrink={0} w={{ base: '100%', sm: 'auto' }}>
+                        <Box bg={BRAND.gradient} px={4} py={3}>
                             <Flex align="center" justify="space-between">
                                 <IconButton aria-label="الشهر السابق" size="sm" variant="ghost" color="white" _hover={{ bg: "whiteAlpha.200" }} onClick={prevCalMonth}>
                                     <ChevronRight size={18} />
@@ -331,12 +581,14 @@ export default function OnlineBookingsPage() {
                         {/* أيام الأسبوع: السبت، الأحد، ... أوضح */}
                         <Box display="grid" gridTemplateColumns="repeat(7,1fr)" bg="#eae8dc" borderBottom="2px solid" borderColor="#b8b399">
                             {AR_WEEKDAYS.map(d => (
-                                <Box key={d} textAlign="center" py={2.5}>
-                                    <Text fontSize="sm" fontWeight="bold" color="#6f6a40">{d}</Text>
+                                <Box key={d} textAlign="center" py={{ base: 2, sm: 2.5 }} px={0.5}>
+                                    <Text fontSize={{ base: '10px', sm: 'xs', md: 'sm' }} fontWeight="bold" color="#6f6a40" lineHeight="short">
+                                        {d}
+                                    </Text>
                                 </Box>
                             ))}
                         </Box>
-                        <Box display="grid" gridTemplateColumns="repeat(7,1fr)" p={2} gap={0.5}>
+                        <Box display="grid" gridTemplateColumns="repeat(7,1fr)" p={{ base: 1.5, sm: 2 }} gap={0.5}>
                             {calendarDays.map((date, idx) => {
                                 if (!date) return <Box key={`empty-${idx}`} />
                                 const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
@@ -353,7 +605,7 @@ export default function OnlineBookingsPage() {
                                         flexDirection="column"
                                         alignItems="center"
                                         justifyContent="center"
-                                        h="44px"
+                                        h={{ base: '38px', sm: '44px' }}
                                         borderRadius="lg"
                                         transition="all 0.15s"
                                         userSelect="none"
@@ -368,29 +620,48 @@ export default function OnlineBookingsPage() {
                                         {isToday && !isSelected && (
                                             <Box position="absolute" inset="2px" borderRadius="md" border="2px solid" borderColor="#9d9870" pointerEvents="none" />
                                         )}
-                                        <Text fontSize="xs" opacity={isSelected ? 0.9 : 0.8} lineHeight={1} mb="1px">{dayNames[date.getDay()]}</Text>
-                                        <Text fontSize="sm" lineHeight={1}>{date.getDate()}</Text>
+                                        <Text fontSize={{ base: '9px', sm: 'xs' }} opacity={isSelected ? 0.9 : 0.8} lineHeight={1} mb="1px">{dayNames[date.getDay()]}</Text>
+                                        <Text fontSize={{ base: 'xs', sm: 'sm' }} lineHeight={1}>{date.getDate()}</Text>
                                     </Box>
                                 )
                             })}
                         </Box>
                         {filterDate && (
-                            <Box px={3} py={2} bg="gray.50" borderTop="1px solid" borderColor="gray.100">
-                                <Text fontSize="xs" color="gray.600" textAlign="center">
+                            <Box px={3} py={2.5} bg="gray.50" borderTop="1px solid" borderColor="gray.100">
+                                <Text fontSize="xs" color="gray.600" textAlign="center" fontWeight="medium">
                                     المحدد: {new Date(filterDate + "T12:00:00").toLocaleDateString("ar-EG", { weekday: "short", day: "numeric", month: "short", year: "numeric" })}
                                 </Text>
                             </Box>
                         )}
                     </Card.Root>
-                    <HStack bg="white" p={1} rounded="lg" shadow="sm" border="1px solid" borderColor="gray.100" flexWrap="wrap">
+                    <Flex
+                        bg="gray.50"
+                        p={1.5}
+                        rounded="xl"
+                        border="1px solid"
+                        borderColor="gray.100"
+                        flexWrap="wrap"
+                        gap={1}
+                        w={{ base: '100%', lg: 'auto' }}
+                        flex={1}
+                        minW={{ base: '100%', lg: '280px' }}
+                    >
                         {(['all', 'pending', 'confirmed', 'rejected', 'cancelled'] as const).map((status) => (
                             <Button
                                 key={status}
                                 size="sm"
                                 variant={filterStatus === status ? 'solid' : 'ghost'}
-                                colorPalette={filterStatus === status ? 'purple' : 'gray'}
+                                colorPalette={filterStatus === status ? 'gray' : 'gray'}
+                                bg={filterStatus === status ? BRAND.primary : 'transparent'}
+                                color={filterStatus === status ? 'white' : 'gray.600'}
+                                _hover={{
+                                    bg: filterStatus === status ? BRAND.primaryMuted : 'white',
+                                    color: filterStatus === status ? 'white' : 'gray.800',
+                                }}
                                 onClick={() => setFilterStatus(status)}
-                                rounded="md"
+                                rounded="lg"
+                                fontWeight="medium"
+                                flex={{ base: '1 1 calc(50% - 4px)', sm: '0 0 auto' }}
                             >
                                 {status === 'all' && 'الكل'}
                                 {status === 'pending' && 'انتظار'}
@@ -399,109 +670,239 @@ export default function OnlineBookingsPage() {
                                 {status === 'cancelled' && 'ملغي'}
                             </Button>
                         ))}
-                    </HStack>
+                    </Flex>
                 </Flex>
+                    </Card.Body>
+                </Card.Root>
 
-                {/* Main Table */}
-                <Box bg="white" rounded="2xl" shadow="sm" border="1px solid" borderColor="gray.100" overflow="hidden">
-                    <Table.Root striped interactive>
-                        <Table.Header bg="gray.50">
-                            <Table.Row>
-                                <Table.ColumnHeader textAlign="right" py={4} fontSize="sm" color="gray.600">المريض</Table.ColumnHeader>
-                                <Table.ColumnHeader textAlign="right" py={4} fontSize="sm" color="gray.600">معلومات الاتصال</Table.ColumnHeader>
-                                <Table.ColumnHeader textAlign="right" py={4} fontSize="sm" color="gray.600">التاريخ والوقت المفضلنين</Table.ColumnHeader>
-                                <Table.ColumnHeader textAlign="right" py={4} fontSize="sm" color="gray.600">الحالة</Table.ColumnHeader>
-                                <Table.ColumnHeader textAlign="right" py={4} fontSize="sm" color="gray.600">إجراءات</Table.ColumnHeader>
-                            </Table.Row>
-                        </Table.Header>
-                        <Table.Body>
-                            <AnimatePresence mode='wait'>
-                                {isLoading ? (
-                                    <Table.Row>
-                                        <Table.Cell colSpan={5} textAlign="center" py={12}>
-                                            <Spinner color="purple.500" size="xl" />
-                                            <Text mt={4} color="gray.500">جاري تحميل الحجوزات...</Text>
-                                        </Table.Cell>
-                                    </Table.Row>
-                                ) : filteredBookings.length > 0 ? (
-                                    filteredBookings.map((booking) => (
-                                        <MotionRow
+                {/* قائمة الطلبات — بطاقات (موبايل) + جدول (md+) */}
+                <Card.Root
+                    borderRadius="2xl"
+                    shadow="sm"
+                    borderWidth="1px"
+                    borderColor={BRAND.cardBorder}
+                    overflow="hidden"
+                >
+                    <Box px={{ base: 3, md: 6 }} py={4} bg={BRAND.surface} borderBottom="1px solid" borderColor="gray.100">
+                        <Flex align="center" justify="space-between" flexWrap="wrap" gap={2}>
+                            <Flex align="center" gap={2} minW={0}>
+                                <CalendarDays size={20} color={BRAND.primary} />
+                                <Text fontWeight="bold" color="gray.800" fontSize={{ base: 'sm', md: 'md' }}>
+                                    قائمة الطلبات
+                                </Text>
+                            </Flex>
+                            <Badge variant="subtle" colorPalette="gray" borderRadius="full" px={3} flexShrink={0}>
+                                {filteredBookings.length} طلب
+                            </Badge>
+                        </Flex>
+                    </Box>
+
+                    {isLoading ? (
+                        <Flex justify="center" align="center" minH="220px" py={12}>
+                            <Flex direction="column" align="center" gap={4}>
+                                <Spinner color={BRAND.primary} size="xl" />
+                                <Text color="gray.500" fontSize="sm">جاري تحميل الحجوزات...</Text>
+                            </Flex>
+                        </Flex>
+                    ) : filteredBookings.length === 0 ? (
+                        <Flex direction="column" align="center" gap={4} py={16} px={4}>
+                            <Flex align="center" justify="center" w={16} h={16} rounded="full" bg={BRAND.surface} borderWidth="1px" borderColor={BRAND.cardBorder}>
+                                <Search size={28} color={BRAND.primary} strokeWidth={1.5} />
+                            </Flex>
+                            <Box textAlign="center">
+                                <Text color="gray.700" fontWeight="semibold" mb={1}>
+                                    لا توجد طلبات
+                                </Text>
+                                <Text color="gray.500" fontSize="sm">
+                                    جرّب تغيير التاريخ أو التصفية أو نص البحث
+                                </Text>
+                            </Box>
+                        </Flex>
+                    ) : (
+                        <>
+                            <Stack gap={3} display={{ base: 'flex', md: 'none' }} p={{ base: 3, sm: 4 }} pb={5}>
+                                {filteredBookings.map((booking) => {
+                                    const row = booking as Booking & {
+                                        type?: string
+                                        email?: string
+                                        phoneNumber?: string
+                                    }
+                                    return (
+                                        <Card.Root
                                             key={booking.id}
-                                            initial={{ opacity: 0, y: 10 }}
-                                            animate={{ opacity: 1, y: 0 }}
-                                            exit={{ opacity: 0, y: -10 }}
-                                            transition={{ duration: 0.2 }}
-                                            _hover={{ bg: "purple.50" }}
+                                            bg="white"
+                                            borderWidth="1px"
+                                            borderColor={BRAND.cardBorder}
+                                            borderRadius="xl"
+                                            shadow="sm"
                                         >
-                                            <Table.Cell py={4}>
-                                                <Flex align="center" gap={3}>
-                                                    {/* @ts-ignore */}
-                                                    <Box bg={booking.type === 'online' ? "purple.100" : "blue.100"} p={2} rounded="xl" color={booking.type === 'online' ? "purple.600" : "blue.600"}>
-                                                        <User size={20} />
-                                                    </Box>
-                                                    <Box>
-                                                        <Text fontWeight="bold" color="gray.800">{booking.customerName}</Text>
-                                                        <Text fontSize="xs" color="gray.500">
-                                                            {booking.createdAt
-                                                                ? new Date(booking.createdAt).toLocaleDateString('ar-EG')
-                                                                : ''}
-                                                        </Text>
-                                                    </Box>
+                                            <Card.Body p={4}>
+                                                <Flex align="flex-start" justify="space-between" gap={2} mb={3} flexWrap="wrap">
+                                                    <Flex align="center" gap={3} minW={0} flex={1}>
+                                                        <Box
+                                                            bg={row.type === 'online' ? 'purple.50' : 'blue.50'}
+                                                            p={2.5}
+                                                            rounded="2xl"
+                                                            color={row.type === 'online' ? 'purple.600' : 'blue.600'}
+                                                            borderWidth="1px"
+                                                            borderColor={row.type === 'online' ? 'purple.100' : 'blue.100'}
+                                                            flexShrink={0}
+                                                        >
+                                                            <User size={20} />
+                                                        </Box>
+                                                        <Box minW={0} flex={1}>
+                                                            <Text fontWeight="bold" color="gray.800" fontSize="sm">
+                                                                {booking.customerName}
+                                                            </Text>
+                                                            <Text fontSize="xs" color="gray.500">
+                                                                {booking.createdAt
+                                                                    ? `طلب في ${new Date(booking.createdAt).toLocaleDateString('ar-EG')}`
+                                                                    : ''}
+                                                            </Text>
+                                                        </Box>
+                                                    </Flex>
+                                                    <Box flexShrink={0}>{getStatusBadge(booking.status)}</Box>
                                                 </Flex>
-                                            </Table.Cell>
-                                            <Table.Cell py={4}>
-                                                <Box>
-                                                    <Text fontSize="sm" fontWeight="medium" color="gray.700" fontFamily="monospace" dir="ltr" textAlign="right">
-                                                        {/* @ts-ignore */}
-                                                        {booking.customerPhone || booking.phoneNumber || '-'}
-                                                    </Text>
-                                                        {/* @ts-ignore */}
-                                                    {booking.email && <Text fontSize="xs" color="gray.500">{booking.email}</Text>}
-                                                </Box>
-                                            </Table.Cell>
-                                            <Table.Cell py={4}>
-                                                <Box>
-                                                    <Text fontSize="sm" fontWeight="medium" color={booking.appointmentDate ? 'green.600' : 'orange.500'}>
+
+                                                <VStack align="stretch" gap={2} mb={3}>
+                                                    <Flex align="center" gap={2} justify="flex-end" flexWrap="wrap">
+                                                        <Phone size={14} color="#94a3b8" />
+                                                        <Text fontSize="sm" fontWeight="medium" color="gray.700" fontFamily="monospace" dir="ltr">
+                                                            {booking.customerPhone || row.phoneNumber || '—'}
+                                                        </Text>
+                                                    </Flex>
+                                                    {row.email && (
+                                                        <Flex align="center" gap={2} justify="flex-end" minW={0}>
+                                                            <Box flexShrink={0} as="span" display="inline-flex">
+                                                                <Mail size={14} color="#94a3b8" />
+                                                            </Box>
+                                                            <Text fontSize="xs" color="gray.500" truncate title={row.email}>
+                                                                {row.email}
+                                                            </Text>
+                                                        </Flex>
+                                                    )}
+                                                </VStack>
+
+                                                <Box mb={3}>
+                                                    <Text fontSize="xs" color="gray.500" mb={1}>الموعد المفضل</Text>
+                                                    <Text fontSize="sm" fontWeight="semibold" color={booking.appointmentDate ? 'green.700' : 'orange.600'}>
                                                         {formatPreferredDateTime(booking)}
                                                     </Text>
                                                     {!booking.appointmentDate && (
-                                                        <Text fontSize="xs" color="gray.400">بانتظار التأكيد</Text>
+                                                        <Badge size="sm" variant="subtle" colorPalette="orange" borderRadius="md" mt={1}>
+                                                            بانتظار التأكيد
+                                                        </Badge>
                                                     )}
                                                 </Box>
-                                            </Table.Cell>
-                                            <Table.Cell py={4}>
-                                                {getStatusBadge(booking.status)}
-                                            </Table.Cell>
-                                            <Table.Cell py={4}>
-                                                <Box as="select"
-                                                    value={booking.status}
-                                                    onChange={(e: React.ChangeEvent<HTMLSelectElement>) => handleStatusChange(booking.id, e.target.value as BookingStatus)}
-                                                    style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid #E2E8F0', backgroundColor: 'white', fontSize: '13px', minWidth: '130px', cursor: 'pointer' }}
-                                                >
-                                                    <option value="pending">قيد الانتظار</option>
-                                                    <option value="confirmed">مؤكد ✅</option>
-                                                    <option value="rejected">مرفوض ❌</option>
-                                                    <option value="cancelled">ملغي</option>
+
+                                                <Box pt={3} borderTopWidth="1px" borderColor="gray.100">
+                                                    <Text fontSize="xs" color="gray.500" mb={2}>تحديث الحالة</Text>
+                                                    {bookingStatusSelect(booking, true)}
                                                 </Box>
-                                            </Table.Cell>
-                                        </MotionRow>
-                                    ))
-                                ) : (
-                                    <Table.Row>
-                                        <Table.Cell colSpan={5} textAlign="center" py={12}>
-                                            <Box display="flex" flexDirection="column" alignItems="center" gap={3} opacity={0.6}>
-                                                <Box p={4} bg="gray.100" rounded="full">
-                                                    <Search size={32} color="gray" />
-                                                </Box>
-                                                <Text color="gray.500">لا توجد طلبات حجز مطابقة للبحث</Text>
-                                            </Box>
-                                        </Table.Cell>
-                                    </Table.Row>
-                                )}
-                            </AnimatePresence>
-                        </Table.Body>
-                    </Table.Root>
-                </Box>
+                                            </Card.Body>
+                                        </Card.Root>
+                                    )
+                                })}
+                            </Stack>
+
+                            <Box display={{ base: 'none', md: 'block' }} overflowX="auto" css={{ WebkitOverflowScrolling: 'touch' }}>
+                                <Table.Root striped interactive minW="720px" size="sm">
+                                    <Table.Header bg="gray.50">
+                                        <Table.Row>
+                                            <Table.ColumnHeader textAlign="right" py={3} px={4} fontSize="sm" color="gray.600" fontWeight="semibold">المريض</Table.ColumnHeader>
+                                            <Table.ColumnHeader textAlign="right" py={3} px={4} fontSize="sm" color="gray.600" fontWeight="semibold">الاتصال</Table.ColumnHeader>
+                                            <Table.ColumnHeader textAlign="right" py={3} px={4} fontSize="sm" color="gray.600" fontWeight="semibold">الموعد المفضل</Table.ColumnHeader>
+                                            <Table.ColumnHeader textAlign="right" py={3} px={4} fontSize="sm" color="gray.600" fontWeight="semibold">الحالة</Table.ColumnHeader>
+                                            <Table.ColumnHeader textAlign="right" py={3} px={4} fontSize="sm" color="gray.600" fontWeight="semibold">تحديث الحالة</Table.ColumnHeader>
+                                        </Table.Row>
+                                    </Table.Header>
+                                    <Table.Body>
+                                        <AnimatePresence initial={false}>
+                                            {filteredBookings.map((booking) => {
+                                                const row = booking as Booking & {
+                                                    type?: string
+                                                    email?: string
+                                                    phoneNumber?: string
+                                                }
+                                                return (
+                                                    <MotionRow
+                                                        key={booking.id}
+                                                        initial={{ opacity: 0, y: 8 }}
+                                                        animate={{ opacity: 1, y: 0 }}
+                                                        exit={{ opacity: 0, y: -8 }}
+                                                        transition={{ duration: 0.15 }}
+                                                        _hover={{ bg: 'rgba(111, 106, 64, 0.06)' }}
+                                                    >
+                                                        <Table.Cell py={3} px={4}>
+                                                            <Flex align="center" gap={3}>
+                                                                <Box
+                                                                    bg={row.type === 'online' ? 'purple.50' : 'blue.50'}
+                                                                    p={2.5}
+                                                                    rounded="2xl"
+                                                                    color={row.type === 'online' ? 'purple.600' : 'blue.600'}
+                                                                    borderWidth="1px"
+                                                                    borderColor={row.type === 'online' ? 'purple.100' : 'blue.100'}
+                                                                >
+                                                                    <User size={20} />
+                                                                </Box>
+                                                                <Box minW={0}>
+                                                                    <Text fontWeight="bold" color="gray.800" fontSize="sm">
+                                                                        {booking.customerName}
+                                                                    </Text>
+                                                                    <Text fontSize="xs" color="gray.500">
+                                                                        {booking.createdAt
+                                                                            ? `طلب في ${new Date(booking.createdAt).toLocaleDateString('ar-EG')}`
+                                                                            : ''}
+                                                                    </Text>
+                                                                </Box>
+                                                            </Flex>
+                                                        </Table.Cell>
+                                                        <Table.Cell py={3} px={4}>
+                                                            <VStack align="stretch" gap={1}>
+                                                                <Flex align="center" gap={2} justify="flex-end">
+                                                                    <Phone size={14} color="#94a3b8" />
+                                                                    <Text fontSize="sm" fontWeight="medium" color="gray.700" fontFamily="monospace" dir="ltr">
+                                                                        {booking.customerPhone || row.phoneNumber || '—'}
+                                                                    </Text>
+                                                                </Flex>
+                                                                {row.email && (
+                                                                    <Flex align="center" gap={2} justify="flex-end">
+                                                                        <Mail size={14} color="#94a3b8" />
+                                                                        <Text fontSize="xs" color="gray.500" truncate maxW="200px" title={row.email}>
+                                                                            {row.email}
+                                                                        </Text>
+                                                                    </Flex>
+                                                                )}
+                                                            </VStack>
+                                                        </Table.Cell>
+                                                        <Table.Cell py={3} px={4}>
+                                                            <Box>
+                                                                <Text fontSize="sm" fontWeight="semibold" color={booking.appointmentDate ? 'green.700' : 'orange.600'}>
+                                                                    {formatPreferredDateTime(booking)}
+                                                                </Text>
+                                                                {!booking.appointmentDate && (
+                                                                    <Badge size="sm" variant="subtle" colorPalette="orange" borderRadius="md" mt={1}>
+                                                                        بانتظار التأكيد
+                                                                    </Badge>
+                                                                )}
+                                                            </Box>
+                                                        </Table.Cell>
+                                                        <Table.Cell py={3} px={4}>
+                                                            {getStatusBadge(booking.status)}
+                                                        </Table.Cell>
+                                                        <Table.Cell py={3} px={4}>
+                                                            {bookingStatusSelect(booking)}
+                                                        </Table.Cell>
+                                                    </MotionRow>
+                                                )
+                                            })}
+                                        </AnimatePresence>
+                                    </Table.Body>
+                                </Table.Root>
+                            </Box>
+                        </>
+                    )}
+                </Card.Root>
 
                 {/* Cancel Confirmation Modal */}
                 <Dialog.Root open={!!cancelId} onOpenChange={() => setCancelId(null)}>
@@ -536,10 +937,10 @@ export default function OnlineBookingsPage() {
                                     <AlertCircle size={48} />
                                 </Box>
                                 <Heading size="lg" mb={2} color="gray.800">
-                                    تأكيد الرفض
+                                    تأكيد إلغاء الحجز
                                 </Heading>
-                                <Text color="gray.600" mb={8}>
-                                    هل أنت متأكد من أنك تريد رفض هذا الحجز؟ لا يمكن التراجع عن هذا الإجراء
+                                <Text color="gray.600" mb={8} lineHeight="tall">
+                                    هل أنت متأكد من إلغاء هذا الطلب؟ يمكنك التراجع لاحقاً بتغيير الحالة إن لزم.
                                 </Text>
                                 <Flex gap={3}>
                                     <Button
@@ -548,7 +949,7 @@ export default function OnlineBookingsPage() {
                                         colorPalette="red"
                                         variant="solid"
                                     >
-                                        نعم، رفض الحجز
+                                        نعم، إلغاء الحجز
                                     </Button>
                                     <Button
                                         flex={1}
@@ -559,6 +960,136 @@ export default function OnlineBookingsPage() {
                                         إلغاء
                                     </Button>
                                 </Flex>
+                            </Dialog.Content>
+                        </Dialog.Positioner>
+                    </Portal>
+                </Dialog.Root>
+
+                {/* تأكيد حجز أونلاين — PATCH يتطلب date + time من available_slots */}
+                <Dialog.Root
+                    open={!!confirmOnlineId}
+                    onOpenChange={(e) => {
+                        if (!e.open) {
+                            setConfirmOnlineId(null)
+                            setConfirmTime('')
+                            setAvailableSlots([])
+                        }
+                    }}
+                >
+                    <Portal>
+                        <Dialog.Backdrop
+                            bg="blackAlpha.600"
+                            backdropFilter="blur(4px)"
+                            zIndex="1400"
+                            position="fixed"
+                            inset="0"
+                        />
+                        <Dialog.Positioner
+                            zIndex="1401"
+                            position="fixed"
+                            inset="0"
+                            display="flex"
+                            alignItems="center"
+                            justifyContent="center"
+                            padding={4}
+                        >
+                            <Dialog.Content
+                                dir="rtl"
+                                bg="white"
+                                borderRadius="2xl"
+                                overflow="hidden"
+                                boxShadow="2xl"
+                                width={{ base: '95%', md: '440px' }}
+                                maxH="90vh"
+                                overflowY="auto"
+                                p={0}
+                            >
+                                <Box bg={BRAND.gradient} px={6} py={4} color="white">
+                                    <Heading size="md" fontWeight="bold">
+                                        تأكيد الحجز الأونلاين
+                                    </Heading>
+                                    <Text opacity={0.95} fontSize="sm" mt={1} lineHeight="tall">
+                                        اختر تاريخاً ووقتاً من المواعيد المتاحة (سلاطات 10 دقائق).
+                                    </Text>
+                                </Box>
+                                <Box p={6}>
+                                <VStack gap={4} align="stretch">
+                                    <Box>
+                                        <Text fontSize="sm" color="gray.600" mb={2} fontWeight="medium">
+                                            التاريخ
+                                        </Text>
+                                        <Input
+                                            type="date"
+                                            value={confirmDate}
+                                            onChange={(e) => setConfirmDate(e.target.value)}
+                                            bg="gray.50"
+                                            borderColor="gray.200"
+                                            minH="44px"
+                                        />
+                                    </Box>
+                                    <Box>
+                                        <Text fontSize="sm" color="gray.600" mb={2} fontWeight="medium">
+                                            وقت الحجز
+                                        </Text>
+                                        {loadingSlots ? (
+                                            <Flex align="center" gap={2} py={2}>
+                                                <Spinner size="sm" />
+                                                <Text fontSize="sm" color="gray.500">جاري جلب المواعيد...</Text>
+                                            </Flex>
+                                        ) : availableSlots.length === 0 ? (
+                                            <Text fontSize="sm" color="orange.600" bg="orange.50" p={3} borderRadius="md">
+                                                لا توجد مواعيد متاحة لهذا اليوم. جرّب تاريخاً آخر أو تأكد من وجود يوم عمل.
+                                            </Text>
+                                        ) : (
+                                            <select
+                                                value={confirmTime}
+                                                onChange={(e) => setConfirmTime(e.target.value)}
+                                                style={{
+                                                    width: '100%',
+                                                    minHeight: '44px',
+                                                    padding: '0 12px',
+                                                    borderRadius: '8px',
+                                                    border: '1px solid #E2E8F0',
+                                                    backgroundColor: '#F7FAFC',
+                                                    fontSize: '14px',
+                                                }}
+                                            >
+                                                <option value="">— اختر الوقت —</option>
+                                                {availableSlots.map((slot) => (
+                                                    <option key={slot} value={slot}>
+                                                        {slot} ({formatTime12(slot)})
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        )}
+                                    </Box>
+                                </VStack>
+                                <Flex gap={3} mt={6}>
+                                    <Button
+                                        flex={1}
+                                        onClick={submitOnlineConfirm}
+                                        bg={BRAND.primary}
+                                        color="white"
+                                        _hover={{ bg: BRAND.primaryMuted }}
+                                        loading={submittingConfirm}
+                                        disabled={!confirmDate || !confirmTime || availableSlots.length === 0 || loadingSlots}
+                                    >
+                                        تأكيد الحجز
+                                    </Button>
+                                    <Button
+                                        flex={1}
+                                        variant="outline"
+                                        colorPalette="gray"
+                                        onClick={() => {
+                                            setConfirmOnlineId(null)
+                                            setConfirmTime('')
+                                            setAvailableSlots([])
+                                        }}
+                                    >
+                                        إلغاء
+                                    </Button>
+                                </Flex>
+                                </Box>
                             </Dialog.Content>
                         </Dialog.Positioner>
                     </Portal>

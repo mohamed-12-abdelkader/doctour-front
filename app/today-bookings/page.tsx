@@ -48,6 +48,12 @@ import {
 } from "lucide-react";
 import api from "@/lib/axios";
 
+const WhatsAppIcon = (props: any) => (
+  <svg viewBox="0 0 24 24" fill="currentColor" {...props}>
+    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51a12.8 12.8 0 0 0-.57-.01c-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413Z"/>
+  </svg>
+);
+
 export default function TodayBookings() {
   const router = useRouter();
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -56,6 +62,7 @@ export default function TodayBookings() {
   const [filterStatus, setFilterStatus] = useState<"all" | BookingStatus>(
     "all"
   );
+  const [filterProcedure, setFilterProcedure] = useState<string>("all");
   const todayStr = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
   const [rangeStart, setRangeStart] = useState<string>(todayStr);
   const [rangeEnd, setRangeEnd] = useState<string>(todayStr);
@@ -180,14 +187,29 @@ export default function TodayBookings() {
 
 
   const filteredBookings = useMemo(() => {
-    if (!searchQuery) return bookings;
+    const byProcedure =
+      filterProcedure === "all"
+        ? bookings
+        : bookings.filter((booking) => booking.procedureType === filterProcedure);
+
+    if (!searchQuery) return byProcedure;
     const searchLower = searchQuery.toLowerCase();
-    return bookings.filter(
+    return byProcedure.filter(
       (booking) =>
         booking.customerName.toLowerCase().includes(searchLower) ||
         booking.customerPhone.includes(searchQuery)
     );
-  }, [bookings, searchQuery]);
+  }, [bookings, searchQuery, filterProcedure]);
+
+  const procedureOptions = useMemo(() => {
+    return Array.from(
+      new Set(
+        bookings
+          .map((booking) => booking.procedureType?.trim())
+          .filter((v): v is string => Boolean(v))
+      )
+    ).sort((a, b) => a.localeCompare(b, "ar"));
+  }, [bookings]);
 
   const totalIncome = useMemo(() => {
     return filteredBookings.reduce((sum, b) => {
@@ -289,12 +311,13 @@ export default function TodayBookings() {
   };
 
   const handleSaveBooking = (data: any) => {
-    // BookingModal بيبعت: { name, phone, date, amountPaid, visitType }
+    // BookingModal بيبعت: { name, phone, date, time, amountPaid, visitType }
     // نحط fallback للـ field names القديمة
     const normalized = {
       name: data.name ?? data.customerName,
       phone: data.phone ?? data.customerPhone,
       date: data.date ?? data.appointmentDate,   // YYYY-MM-DD
+      time: data.time ?? data.timeSlot,
       amountPaid: typeof data.amountPaid === "string"
         ? parseFloat(data.amountPaid) : data.amountPaid,
       visitType: data.visitType,
@@ -397,7 +420,8 @@ export default function TodayBookings() {
     return undefined;
   };
 
-  const formatTime = (dateString: string) => {
+  const formatTime = (dateString: string | null | undefined) => {
+    if (!dateString) return "-";
     const date = new Date(dateString);
     return date.toLocaleTimeString("ar-EG", {
       hour: "numeric",
@@ -449,7 +473,7 @@ export default function TodayBookings() {
                 variant="ghost"
                 color="white"
                 _hover={{ bg: "whiteAlpha.200" }}
-                onClick={fetchBookings}
+                onClick={() => fetchBookings()}
                 loading={isLoading}
                 // @ts-ignore
                 leftIcon={<RefreshCw size={18} />}
@@ -746,6 +770,35 @@ export default function TodayBookings() {
                 </Box>
               </Flex>
               <Flex gap={2} wrap="wrap">
+                <Box
+                  bg="gray.50"
+                  border="1px solid"
+                  borderColor="gray.200"
+                  borderRadius="lg"
+                  minW={{ base: "full", sm: "220px" }}
+                  px={1}
+                >
+                  <select
+                    value={filterProcedure}
+                    onChange={(e) => setFilterProcedure(e.target.value)}
+                    style={{
+                      width: "100%",
+                      background: "transparent",
+                      border: "none",
+                      outline: "none",
+                      padding: "8px 10px",
+                      color: "#374151",
+                      fontSize: "14px",
+                    }}
+                  >
+                    <option value="all">كل الإجراءات</option>
+                    {procedureOptions.map((procedure) => (
+                      <option key={procedure} value={procedure}>
+                        {procedure}
+                      </option>
+                    ))}
+                  </select>
+                </Box>
                 <Flex bg="gray.50" p={1} rounded="xl" gap={1}>
                   {(["all", "online", "clinic"] as const).map((type) => (
                     <Button
@@ -863,11 +916,80 @@ export default function TodayBookings() {
                         router.push(`/patient-history/${booking.id}`)
                       }
                     >
-                      <Flex justify="space-between" align="start" gap={3}>
+                      <Flex justify="space-between" align="start" gap={3} w="full">
+                        {/* Info Section (Right side in RTL) */}
+                        <Flex align="start" gap={3} flex={1} minW={0}>
+                          <Text
+                            fontWeight="bold"
+                            fontSize="md"
+                            color="#666139"
+                            minW="24px"
+                            flexShrink={0}
+                            pt={1}
+                          >
+                            #{index + 1}
+                          </Text>
+                          <Avatar.Root size="md" flexShrink={0} bg="#666139">
+                            <Avatar.Fallback
+                              color="white"
+                              fontWeight="bold"
+                              fontSize="md"
+                            >
+                              {booking.customerName?.charAt(0) || "?"}
+                            </Avatar.Fallback>
+                          </Avatar.Root>
+                          <Box minW={0} textAlign="right" pt={1}>
+                            <Text
+                              fontWeight="bold"
+                              fontSize="md"
+                              color="#2d3748"
+                              // @ts-ignore
+                              noOfLines={1}
+                              lineHeight="short"
+                            >
+                              {booking.customerName}
+                            </Text>
+                            <Flex align="center" gap={2} mt={1.5}>
+                              <Text fontSize="sm" color="gray.500" dir="ltr">
+                                {booking.customerPhone}
+                              </Text>
+                              <a
+                                href={`https://wa.me/${booking.customerPhone.startsWith('0') ? '2' + booking.customerPhone : booking.customerPhone}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <Box color="#25D366" _hover={{ color: "#128C7E", transform: "scale(1.1)" }} transition="all 0.2s">
+                                  <WhatsAppIcon width="16px" height="16px" />
+                                </Box>
+                              </a>
+                            </Flex>
+                            <Flex align="center" gap={2} mt={3} flexWrap="wrap">
+                              <Box bg="white" border="1px solid" borderColor="gray.200" px={2} py={0.5} borderRadius="md" shadow="sm">
+                                <Text
+                                  fontSize="xs"
+                                  fontWeight="bold"
+                                  color="#666139"
+                                >
+                                  {formatTime(booking.appointmentDate ?? "")}
+                                </Text>
+                              </Box>
+                              {booking.procedureType ? (
+                                <Badge variant="solid" bg="#666139" color="white" fontSize="xs" px={2} py={0.5} rounded="md">
+                                  {booking.procedureType}
+                                </Badge>
+                              ) : (
+                                <Text fontSize="xs" color="gray.400">-</Text>
+                              )}
+                            </Flex>
+                          </Box>
+                        </Flex>
+
+                        {/* Badges Section (Left side in RTL) */}
                         <Flex
                           direction="column"
                           align="end"
-                          gap={1}
+                          gap={1.5}
                           flexShrink={0}
                         >
                           {getExaminationStatusBadge(booking.examinationStatus)}
@@ -878,71 +1000,13 @@ export default function TodayBookings() {
                                 ? "green"
                                 : "blue"
                             }
-                            variant="subtle"
-                            fontSize="xs"
+                            variant="outline"
+                            fontSize="2xs"
                           >
                             {booking.bookingType === "online"
                               ? "أونلاين"
                               : "عيادة"}
                           </Badge>
-                        </Flex>
-                        <Flex align="center" gap={3} flex={1} minW={0}>
-                          <Text
-                            fontWeight="bold"
-                            fontSize="lg"
-                            color="#666139"
-                            minW="28px"
-                            flexShrink={0}
-                          >
-                            {index + 1}
-                          </Text>
-                          <Avatar.Root size="sm" flexShrink={0} bg="#666139">
-                            <Avatar.Fallback
-                              color="white"
-                              fontWeight="bold"
-                              fontSize="sm"
-                            >
-                              {booking.customerName?.charAt(0) || "?"}
-                            </Avatar.Fallback>
-                          </Avatar.Root>
-                          <Box minW={0}>
-                            <Text
-                              fontWeight="bold"
-                              fontSize="lg"
-                              color="#2d3748"
-                              // @ts-ignore
-                              noOfLines={1}
-                            >
-                              {booking.customerName}
-                            </Text>
-                            <Text fontSize="sm" color="gray.500">
-                              {booking.customerPhone}
-                            </Text>
-                            <Flex align="center" gap={2} mt={1}>
-                              <Text
-                                fontSize="sm"
-                                fontWeight="bold"
-                                color="#666139"
-                              >
-                                {formatTime(booking.appointmentDate)}
-                              </Text>
-                              <Badge
-                                colorScheme={
-                                  booking.visitType === "checkup"
-                                    ? "purple"
-                                    : "orange"
-                                }
-                                variant="subtle"
-                                fontSize="xs"
-                              >
-                                {booking.visitType === "checkup"
-                                  ? "كشف"
-                                  : booking.visitType === "followup"
-                                    ? "إعادة"
-                                    : "-"}
-                              </Badge>
-                            </Flex>
-                          </Box>
                         </Flex>
                       </Flex>
                       <Flex
@@ -1082,12 +1146,12 @@ export default function TodayBookings() {
                     <Table.ColumnHeader
                       py={4}
                       px={4}
-                      fontSize="xs"
+                      fontSize="sm"
                       fontWeight="bold"
                       color="gray.600"
                       textTransform="uppercase"
                     >
-                      نوع الزيارة
+                      الإجراء
                     </Table.ColumnHeader>
                     <Table.ColumnHeader
                       py={4}
@@ -1145,7 +1209,7 @@ export default function TodayBookings() {
                 <Table.Body>
                   {filteredBookings.length === 0 ? (
                     <Table.Row>
-                      <Table.Cell colSpan={9} textAlign="center" py={16}>
+                      <Table.Cell colSpan={11} textAlign="center" py={16}>
                         <Users
                           size={48}
                           color="#e2e8f0"
@@ -1209,7 +1273,19 @@ export default function TodayBookings() {
                           fontSize="sm"
                           color="gray.600"
                         >
-                          {booking.customerPhone}
+                          <Flex align="center" gap={2}>
+                            <Text>{booking.customerPhone}</Text>
+                            <a
+                              href={`https://wa.me/${booking.customerPhone.startsWith('0') ? '2' + booking.customerPhone : booking.customerPhone}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <Box color="#25D366" _hover={{ color: "#128C7E", transform: "scale(1.1)" }} transition="all 0.2s" cursor="pointer">
+                                <WhatsAppIcon width="18px" height="18px" />
+                              </Box>
+                            </a>
+                          </Flex>
                         </Table.Cell>
                         <Table.Cell py={4} px={4}>
                           <Badge
@@ -1229,23 +1305,13 @@ export default function TodayBookings() {
                           </Badge>
                         </Table.Cell>
                         <Table.Cell py={4} px={4}>
-                          <Badge
-                            colorScheme={
-                              booking.visitType === "checkup"
-                                ? "purple"
-                                : "orange"
-                            }
-                            variant="subtle"
-                            px={2}
-                            py={0.5}
-                            rounded="full"
-                          >
-                            {booking.visitType === "checkup"
-                              ? "كشف"
-                              : booking.visitType === "followup"
-                                ? "إعادة"
-                                : "-"}
-                          </Badge>
+                          {booking.procedureType ? (
+                            <Badge variant="solid" bg="#666139" color="white" px={3} py={1} rounded="full" fontWeight="bold">
+                              {booking.procedureType}
+                            </Badge>
+                          ) : (
+                            <Text color="gray.400" fontSize="sm">-</Text>
+                          )}
                         </Table.Cell>
                         <Table.Cell
                           py={4}
@@ -1253,7 +1319,7 @@ export default function TodayBookings() {
                           fontWeight="medium"
                           color="gray.700"
                         >
-                          {formatTime(booking.appointmentDate)}
+                          {formatTime(booking.appointmentDate ?? "")}
                         </Table.Cell>
                         <Table.Cell
                           py={4}

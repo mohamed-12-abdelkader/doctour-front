@@ -12,7 +12,10 @@ export interface Booking {
     bookingType: BookingType;
     amountPaid: string | number;
     status: BookingStatus;
-    visitType?: VisitType;
+    /** نوع الزيارة: checkup/followup/consultation أو اسم الخدمة من BOOKING_SERVICES */
+    visitType?: VisitType | string;
+    /** نوع الإجراء/الخدمة (clinic) */
+    procedureType?: string | null;
     examinationStatus?: ExaminationStatus;
     /** الأونلاين فقط: التاريخ المفضل */
     preferredDate?: string | null;
@@ -32,8 +35,11 @@ export interface CreateClinicBookingData {
     name: string;
     phone: string;
     date: string;        // YYYY-MM-DD (الـ API بيتوقع date مش dateTime)
+    /** اختياري: وقت الحجز (HH:mm) — يُرسل في حقل time حسب توثيق الـ API */
+    time?: string;
     amountPaid?: number;
-    visitType?: VisitType;
+    /** نوع الحجز: من قائمة الخدمات (BOOKING_SERVICES) أو القيم القديمة checkup/followup/consultation */
+    visitType?: VisitType | string;
 }
 
 // ─── Clinic booking update ────────────────────────────────────────────────────
@@ -41,8 +47,9 @@ export interface UpdateBookingData {
     name?: string;
     phone?: string;
     date?: string;        // YYYY-MM-DD
+    time?: string;
     amountPaid?: number;
-    visitType?: VisitType;
+    visitType?: VisitType | string;
 }
 
 // ─── Online booking creation (Public) ────────────────────────────────────────
@@ -166,13 +173,19 @@ export interface SlotInfo {
     available: boolean;
 }
 
+/** استجابة GET /api/bookings/available-slots — المواعيد المتاحة فقط (سلاطات 10 دقائق، حجز واحد لكل موعد) */
 export interface AvailableSlotsResponse {
-    available: boolean;
+    /** من الـ API: available_slots (snake_case) */
+    available_slots?: string[];
+    /** توافق مع كود قديم */
+    availableSlots?: string[];
     date?: string;
     workingHours?: { start: string; end: string };
-    slots?: SlotInfo[];
-    availableSlots?: string[];
+    /** عند عدم التوفر: available: false و message */
+    available?: boolean;
     message?: string;
+    /** توافق قديم: قائمة بكل السلات مع count/available */
+    slots?: SlotInfo[];
 }
 
 export interface SlotBooking {

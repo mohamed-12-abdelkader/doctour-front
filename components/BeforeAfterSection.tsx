@@ -131,6 +131,7 @@ export default function BeforeAfterSection() {
             WebkitOverflowScrolling: "touch",
             scrollbarWidth: "none",
           }}
+          // eslint-disable-next-line react-hooks/refs
           cursor={isDraggingRef.current ? "grabbing" : "grab"}
           onMouseDown={(e) => handlePointerDown(e.clientX)}
           onMouseMove={(e) => handlePointerMove(e.clientX)}

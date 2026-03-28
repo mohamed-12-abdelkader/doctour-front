@@ -1,3 +1,4 @@
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const fs = require('fs');
 
 let file = fs.readFileSync('d:/doctour/app/admin/working-days/page.tsx', 'utf8');

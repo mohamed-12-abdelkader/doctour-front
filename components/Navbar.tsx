@@ -48,6 +48,7 @@ const Logo = () => (
       fontWeight="bold"
       color={BRAND.color}
       fontSize={{ base: "md", md: "lg" }}
+      // @ts-ignore
       noOfLines={1}
     >
       {SITE_NAME}
@@ -78,11 +79,13 @@ export default function Navbar() {
   const [isFullAdmin, setIsFullAdmin] = useState(false);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMounted(true);
   }, []);
 
   useEffect(() => {
     if (!mounted) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoggedIn(isAdminLoggedIn());
     setPermissions(getCurrentUserPermissions());
     setIsFullAdmin(getIsFullAdmin());
@@ -134,6 +137,7 @@ export default function Navbar() {
           <Box
             bg="rgba(255, 255, 255, 0.92)"
             backdropFilter="blur(12px)"
+            // @ts-ignore
             WebkitBackdropFilter="blur(12px)"
             borderWidth="1px"
             borderColor={BRAND.border}

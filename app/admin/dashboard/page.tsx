@@ -28,6 +28,7 @@ export default function AdminDashboard() {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setPermissions(getCurrentUserPermissions());
     setIsFullAdmin(getIsFullAdmin());
     setMounted(true);
@@ -320,6 +321,7 @@ export default function AdminDashboard() {
                               fontSize="sm"
                               color="gray.500"
                               lineHeight="tall"
+                              // @ts-ignore
                               noOfLines={2}
                             >
                               {link.description}

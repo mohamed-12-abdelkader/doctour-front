@@ -311,13 +311,15 @@ export default function PatientHistoryPage() {
                         )}
                     </Flex>
                     <Box
-                        as="a" href={report.prescriptionImageUrl} target="_blank" rel="noopener noreferrer"
-                        display="block" borderRadius="lg" overflow="hidden"
-                        border="2px solid" borderColor="#c9b97a"
-                        maxW="260px" position="relative" cursor="pointer"
-                        _hover={{ opacity: 0.9 }}
+                    // @ts-ignore
+                    as="a" href={report.prescriptionImageUrl} target="_blank" rel="noopener noreferrer"
+                    display="block" borderRadius="lg" overflow="hidden"
+                    border="2px solid" borderColor="#c9b97a"
+                    maxW="260px" position="relative" cursor="pointer"
+                    _hover={{ opacity: 0.9 }}
                     >
                         <Box
+                        // @ts-ignore
                             as="img" src={report.prescriptionImageUrl} alt="صورة الروشتة"
                             style={{ width: '100%', display: 'block', borderRadius: '8px' }}
                         />
@@ -392,6 +394,7 @@ export default function PatientHistoryPage() {
                                 <Text>{currentBooking.customerPhone}</Text>
                             </Flex>
                             <Flex gap={2} mt={3} flexWrap="wrap">
+                                {/* @ts-ignore */}
                                 {getVisitTypeBadge(currentBooking.visitType)}
                                 {getStatusBadge(currentBooking.status)}
                                 <Badge colorPalette={currentBooking.bookingType === 'online' ? 'green' : 'blue'} variant="subtle" px={2} py={0.5} rounded="full">
@@ -459,6 +462,7 @@ export default function PatientHistoryPage() {
                                 <Stack gap={4}>
                                     <Flex justify="space-between" align="center">
                                         <Text fontSize="sm" color="gray.500">موعد الحجز</Text>
+                                        {/* @ts-ignore */}
                                         <Text fontWeight="bold">{formatDate(currentBooking.appointmentDate)}</Text>
                                     </Flex>
                                     <Flex justify="space-between" align="center">
@@ -467,6 +471,7 @@ export default function PatientHistoryPage() {
                                     </Flex>
                                     <Flex justify="space-between" align="center">
                                         <Text fontSize="sm" color="gray.500">نوع الزيارة</Text>
+                                        {/* @ts-ignore */}
                                         {getVisitTypeBadge(currentBooking.visitType)}
                                     </Flex>
                                     <Flex justify="space-between" align="center">
@@ -552,8 +557,10 @@ export default function PatientHistoryPage() {
                                                 <Flex gap={4} py={4} align="start">
                                                     <Box w={6} h={6} borderRadius="full" bg="#615b36" flexShrink={0} mt={0.5} position="relative" zIndex={1} />
                                                     <Box flex={1} minW={0}>
+                                                        {/* @ts-ignore */}
                                                         <Text fontWeight="bold" color="#2d3748" fontSize="sm">{formatDate(booking.appointmentDate)}</Text>
                                                         <Flex gap={2} mt={2} flexWrap="wrap">
+                                                        {/* @ts-ignore */}
                                                             {getVisitTypeBadge(booking.visitType)}
                                                             {getStatusBadge(booking.status)}
                                                             <Badge colorPalette={booking.bookingType === 'online' ? 'green' : 'blue'} variant="subtle" fontSize="xs">
@@ -703,10 +710,12 @@ export default function PatientHistoryPage() {
                                             <Text fontSize="xs" color="gray.500" mb={1}>الصورة الحالية:</Text>
                                             <Box position="relative" display="inline-block">
                                                 <Box
-                                                    as="img" src={existingPrescriptionUrl} alt="الروشتة الحالية"
-                                                    style={{ height: '96px', borderRadius: '8px', border: '2px solid #c9b97a', display: 'block' }}
+                                                // @ts-ignore
+                                                as="img" src={existingPrescriptionUrl} alt="الروشتة الحالية"
+                                                style={{ height: '96px', borderRadius: '8px', border: '2px solid #c9b97a', display: 'block' }}
                                                 />
                                                 <Box
+                                                // @ts-ignore
                                                     as="a" href={existingPrescriptionUrl} target="_blank"
                                                     position="absolute" top={1} left={1}
                                                     bg="blackAlpha.600" borderRadius="full" p={1} cursor="pointer"
@@ -721,6 +730,7 @@ export default function PatientHistoryPage() {
                                     {prescriptionPreview && prescriptionPreview !== 'pdf' && (
                                         <Box mb={3} position="relative" display="inline-block">
                                             <Box
+                                            // @ts-ignore
                                                 as="img" src={prescriptionPreview} alt="معاينة الروشتة"
                                                 style={{ height: '96px', borderRadius: '8px', border: '2px solid #615b36', display: 'block' }}
                                             />

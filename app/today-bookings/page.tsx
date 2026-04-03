@@ -47,12 +47,12 @@ import {
   ChevronLeft,
 } from "lucide-react";
 import api from "@/lib/axios";
-
-const WhatsAppIcon = (props: any) => (
-  <svg viewBox="0 0 24 24" fill="currentColor" {...props}>
-    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51a12.8 12.8 0 0 0-.57-.01c-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413Z"/>
-  </svg>
-);
+import {
+  canChooseDoctor,
+  getCurrentDoctorId,
+  getCurrentRole,
+  setSelectedDoctorId,
+} from "@/lib/doctor-context";
 
 export default function TodayBookings() {
   const router = useRouter();
@@ -75,6 +75,31 @@ export default function TodayBookings() {
   const [isLoading, setIsLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingBooking, setEditingBooking] = useState<Booking | null>(null);
+  const [doctors, setDoctors] = useState<Array<{ id: number; name?: string; user?: { name?: string } }>>([]);
+  const [selectedDoctorId, setDoctorId] = useState<number>(0);
+  const [canSelectDoctor, setCanSelectDoctor] = useState(false);
+
+  useEffect(() => {
+    const role = getCurrentRole();
+    const canSelect = canChooseDoctor(role);
+    setCanSelectDoctor(canSelect);
+    const current = getCurrentDoctorId();
+    if (current) setDoctorId(current);
+  }, []);
+
+  useEffect(() => {
+    if (!canSelectDoctor) return;
+    const loadDoctors = async () => {
+      try {
+        const res = await api.get("/doctors");
+        const list = Array.isArray(res.data) ? res.data : (res.data?.doctors ?? []);
+        setDoctors(Array.isArray(list) ? list : []);
+      } catch {
+        setDoctors([]);
+      }
+    };
+    loadDoctors();
+  }, [canSelectDoctor]);
 
   const fetchBookings = async (silent = false) => {
     if (!silent) setIsLoading(true);
@@ -96,6 +121,7 @@ export default function TodayBookings() {
         params.startDate = rangeStart;
         params.endDate = rangeEnd;
       }
+      if (selectedDoctorId) params.doctorId = selectedDoctorId;
 
       const response = await api.get("/bookings/all", { params });
 
@@ -119,7 +145,7 @@ export default function TodayBookings() {
   // جلب أولي وعند تغيير الفلاتر/التاريخ
   useEffect(() => {
     fetchBookings();
-  }, [filterType, filterStatus, rangeStart, rangeEnd]);
+  }, [filterType, filterStatus, rangeStart, rangeEnd, selectedDoctorId]);
 
   // ريل تايم: تحديث تلقائي كل 5 ثوانٍ لظهور تغييرات حالة الكشف دون ريفرش
   useEffect(() => {
@@ -130,7 +156,7 @@ export default function TodayBookings() {
       }
     }, POLL_INTERVAL_MS);
     return () => clearInterval(id);
-  }, [filterType, filterStatus, rangeStart, rangeEnd]);
+  }, [filterType, filterStatus, rangeStart, rangeEnd, selectedDoctorId]);
 
   // Calendar helpers
   const calYear = calViewDate.getFullYear();
@@ -318,6 +344,7 @@ export default function TodayBookings() {
       phone: data.phone ?? data.customerPhone,
       date: data.date ?? data.appointmentDate,   // YYYY-MM-DD
       time: data.time ?? data.timeSlot,
+      doctorId: Number(data.doctorId ?? selectedDoctorId) || undefined,
       amountPaid: typeof data.amountPaid === "string"
         ? parseFloat(data.amountPaid) : data.amountPaid,
       visitType: data.visitType,
@@ -420,14 +447,32 @@ export default function TodayBookings() {
     return undefined;
   };
 
-  const formatTime = (dateString: string | null | undefined) => {
-    if (!dateString) return "-";
-    const date = new Date(dateString);
-    return date.toLocaleTimeString("ar-EG", {
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-    });
+  const formatTime = (booking: Booking) => {
+    const raw24 = (booking as any).appointmentTime24 as string | undefined;
+    if (raw24) {
+      const [h = "0", m = "0"] = raw24.split(":");
+      const hour = Number(h);
+      const minute = Number(m);
+      if (!Number.isNaN(hour) && !Number.isNaN(minute)) {
+        const period = hour >= 12 ? "م" : "ص";
+        const hour12 = hour % 12 || 12;
+        return `${hour12}:${String(minute).padStart(2, "0")} ${period}`;
+      }
+    }
+
+    const raw12 = (booking as any).appointmentTime as string | undefined;
+    if (raw12) return raw12;
+
+    if (!booking.appointmentDate) return "-";
+    const [_, timePart = ""] = booking.appointmentDate.split("T");
+    if (!timePart) return "-";
+    const [h = "0", m = "0"] = timePart.split(":");
+    const hour = Number(h);
+    const minute = Number(m);
+    if (Number.isNaN(hour) || Number.isNaN(minute)) return "-";
+    const period = hour >= 12 ? "م" : "ص";
+    const hour12 = hour % 12 || 12;
+    return `${hour12}:${String(minute).padStart(2, "0")} ${period}`;
   };
 
   const formatAmount = (amount: string | number) => {
@@ -770,6 +815,41 @@ export default function TodayBookings() {
                 </Box>
               </Flex>
               <Flex gap={2} wrap="wrap">
+                {canSelectDoctor && (
+                  <Box
+                    bg="gray.50"
+                    border="1px solid"
+                    borderColor="gray.200"
+                    borderRadius="lg"
+                    minW={{ base: "full", sm: "220px" }}
+                    px={1}
+                  >
+                    <select
+                      value={selectedDoctorId || ""}
+                      onChange={(e) => {
+                        const id = Number(e.target.value) || 0;
+                        setDoctorId(id);
+                        setSelectedDoctorId(id || null);
+                      }}
+                      style={{
+                        width: "100%",
+                        background: "transparent",
+                        border: "none",
+                        outline: "none",
+                        padding: "8px 10px",
+                        color: "#374151",
+                        fontSize: "14px",
+                      }}
+                    >
+                      <option value="">كل الأطباء</option>
+                      {doctors.map((doc) => (
+                        <option key={doc.id} value={doc.id}>
+                          {doc.user?.name || doc.name || `Doctor #${doc.id}`}
+                        </option>
+                      ))}
+                    </select>
+                  </Box>
+                )}
                 <Box
                   bg="gray.50"
                   border="1px solid"
@@ -916,80 +996,11 @@ export default function TodayBookings() {
                         router.push(`/patient-history/${booking.id}`)
                       }
                     >
-                      <Flex justify="space-between" align="start" gap={3} w="full">
-                        {/* Info Section (Right side in RTL) */}
-                        <Flex align="start" gap={3} flex={1} minW={0}>
-                          <Text
-                            fontWeight="bold"
-                            fontSize="md"
-                            color="#666139"
-                            minW="24px"
-                            flexShrink={0}
-                            pt={1}
-                          >
-                            #{index + 1}
-                          </Text>
-                          <Avatar.Root size="md" flexShrink={0} bg="#666139">
-                            <Avatar.Fallback
-                              color="white"
-                              fontWeight="bold"
-                              fontSize="md"
-                            >
-                              {booking.customerName?.charAt(0) || "?"}
-                            </Avatar.Fallback>
-                          </Avatar.Root>
-                          <Box minW={0} textAlign="right" pt={1}>
-                            <Text
-                              fontWeight="bold"
-                              fontSize="md"
-                              color="#2d3748"
-                              // @ts-ignore
-                              noOfLines={1}
-                              lineHeight="short"
-                            >
-                              {booking.customerName}
-                            </Text>
-                            <Flex align="center" gap={2} mt={1.5}>
-                              <Text fontSize="sm" color="gray.500" dir="ltr">
-                                {booking.customerPhone}
-                              </Text>
-                              <a
-                                href={`https://wa.me/${booking.customerPhone.startsWith('0') ? '2' + booking.customerPhone : booking.customerPhone}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <Box color="#25D366" _hover={{ color: "#128C7E", transform: "scale(1.1)" }} transition="all 0.2s">
-                                  <WhatsAppIcon width="16px" height="16px" />
-                                </Box>
-                              </a>
-                            </Flex>
-                            <Flex align="center" gap={2} mt={3} flexWrap="wrap">
-                              <Box bg="white" border="1px solid" borderColor="gray.200" px={2} py={0.5} borderRadius="md" shadow="sm">
-                                <Text
-                                  fontSize="xs"
-                                  fontWeight="bold"
-                                  color="#666139"
-                                >
-                                  {formatTime(booking.appointmentDate ?? "")}
-                                </Text>
-                              </Box>
-                              {booking.procedureType ? (
-                                <Badge variant="solid" bg="#666139" color="white" fontSize="xs" px={2} py={0.5} rounded="md">
-                                  {booking.procedureType}
-                                </Badge>
-                              ) : (
-                                <Text fontSize="xs" color="gray.400">-</Text>
-                              )}
-                            </Flex>
-                          </Box>
-                        </Flex>
-
-                        {/* Badges Section (Left side in RTL) */}
+                      <Flex justify="space-between" align="start" gap={3}>
                         <Flex
                           direction="column"
                           align="end"
-                          gap={1.5}
+                          gap={1}
                           flexShrink={0}
                         >
                           {getExaminationStatusBadge(booking.examinationStatus)}
@@ -1000,13 +1011,80 @@ export default function TodayBookings() {
                                 ? "green"
                                 : "blue"
                             }
-                            variant="outline"
-                            fontSize="2xs"
+                            variant="subtle"
+                            fontSize="xs"
                           >
                             {booking.bookingType === "online"
                               ? "أونلاين"
                               : "عيادة"}
                           </Badge>
+                        </Flex>
+                        <Flex align="center" gap={3} flex={1} minW={0}>
+                          <Text
+                            fontWeight="bold"
+                            fontSize="lg"
+                            color="#666139"
+                            minW="28px"
+                            flexShrink={0}
+                          >
+                            {index + 1}
+                          </Text>
+                          <Avatar.Root size="sm" flexShrink={0} bg="#666139">
+                            <Avatar.Fallback
+                              color="white"
+                              fontWeight="bold"
+                              fontSize="sm"
+                            >
+                              {booking.customerName?.charAt(0) || "?"}
+                            </Avatar.Fallback>
+                          </Avatar.Root>
+                          <Box minW={0}>
+                            <Text
+                              fontWeight="bold"
+                              fontSize="lg"
+                              color="#2d3748"
+                              // @ts-ignore
+                              noOfLines={1}
+                            >
+                              {booking.customerName}
+                            </Text>
+                            <Text fontSize="sm" color="gray.500">
+                              {booking.customerPhone}
+                            </Text>
+                            <Flex align="center" gap={2} mt={1}>
+                              <Text
+                                fontSize="sm"
+                                fontWeight="bold"
+                                color="#666139"
+                              >
+                                {formatTime(booking)}
+                              </Text>
+                              <Badge
+                                colorScheme={
+                                  booking.visitType === "checkup"
+                                    ? "purple"
+                                    : booking.visitType === "followup"
+                                      ? "orange"
+                                      : "blue"
+                                }
+                                variant="subtle"
+                                fontSize="xs"
+                              >
+                                {booking.visitType === "checkup"
+                                  ? "كشف"
+                                  : booking.visitType === "followup"
+                                    ? "إعادة"
+                                    : booking.visitType === "consultation"
+                                      ? "استشارة"
+                                      : booking.visitType ?? "-"}
+                              </Badge>
+                              {booking.procedureType && (
+                                <Badge variant="outline" fontSize="xs" colorScheme="teal">
+                                  {booking.procedureType}
+                                </Badge>
+                              )}
+                            </Flex>
+                          </Box>
                         </Flex>
                       </Flex>
                       <Flex
@@ -1146,7 +1224,17 @@ export default function TodayBookings() {
                     <Table.ColumnHeader
                       py={4}
                       px={4}
-                      fontSize="sm"
+                      fontSize="xs"
+                      fontWeight="bold"
+                      color="gray.600"
+                      textTransform="uppercase"
+                    >
+                      نوع الزيارة
+                    </Table.ColumnHeader>
+                    <Table.ColumnHeader
+                      py={4}
+                      px={4}
+                      fontSize="xs"
                       fontWeight="bold"
                       color="gray.600"
                       textTransform="uppercase"
@@ -1273,19 +1361,7 @@ export default function TodayBookings() {
                           fontSize="sm"
                           color="gray.600"
                         >
-                          <Flex align="center" gap={2}>
-                            <Text>{booking.customerPhone}</Text>
-                            <a
-                              href={`https://wa.me/${booking.customerPhone.startsWith('0') ? '2' + booking.customerPhone : booking.customerPhone}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <Box color="#25D366" _hover={{ color: "#128C7E", transform: "scale(1.1)" }} transition="all 0.2s" cursor="pointer">
-                                <WhatsAppIcon width="18px" height="18px" />
-                              </Box>
-                            </a>
-                          </Flex>
+                          {booking.customerPhone}
                         </Table.Cell>
                         <Table.Cell py={4} px={4}>
                           <Badge
@@ -1305,13 +1381,30 @@ export default function TodayBookings() {
                           </Badge>
                         </Table.Cell>
                         <Table.Cell py={4} px={4}>
-                          {booking.procedureType ? (
-                            <Badge variant="solid" bg="#666139" color="white" px={3} py={1} rounded="full" fontWeight="bold">
-                              {booking.procedureType}
-                            </Badge>
-                          ) : (
-                            <Text color="gray.400" fontSize="sm">-</Text>
-                          )}
+                          <Badge
+                            colorScheme={
+                              booking.visitType === "checkup"
+                                ? "purple"
+                                : booking.visitType === "followup"
+                                  ? "orange"
+                                  : "blue"
+                            }
+                            variant="subtle"
+                            px={2}
+                            py={0.5}
+                            rounded="full"
+                          >
+                            {booking.visitType === "checkup"
+                              ? "كشف"
+                              : booking.visitType === "followup"
+                                ? "إعادة"
+                                : booking.visitType === "consultation"
+                                  ? "استشارة"
+                                  : booking.visitType ?? "-"}
+                          </Badge>
+                        </Table.Cell>
+                        <Table.Cell py={4} px={4} fontSize="sm" color="gray.700">
+                          {booking.procedureType || "-"}
                         </Table.Cell>
                         <Table.Cell
                           py={4}
@@ -1319,7 +1412,7 @@ export default function TodayBookings() {
                           fontWeight="medium"
                           color="gray.700"
                         >
-                          {formatTime(booking.appointmentDate ?? "")}
+                          {formatTime(booking)}
                         </Table.Cell>
                         <Table.Cell
                           py={4}
@@ -1445,6 +1538,7 @@ export default function TodayBookings() {
         onClose={() => setIsModalOpen(false)}
         onSave={handleSaveBooking}
         initialData={editingBooking}
+        doctorId={selectedDoctorId || getCurrentDoctorId()}
       />
 
       <style jsx global>{`

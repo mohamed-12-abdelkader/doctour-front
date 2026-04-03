@@ -1,51 +1,73 @@
 "use client";
 
-import { useRef } from "react";
-import {
-  Box,
-  Container,
-  Flex,
-  Heading,
-  Text,
-  IconButton,
-} from "@chakra-ui/react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { useRef, useState, useEffect } from "react";
+import { Box, Container, Flex, Heading, Text } from "@chakra-ui/react";
 import { beforeAfterImages } from "@/data/beforeAfterImages";
 
 const BRAND = "#5d562c";
 
+/** سرعة التمرير الأفقي (بكسل لكل إطار ≈ 60fps) — زِد القيمة لحركة أسرع */
+const SCROLL_PX_PER_FRAME = 2.25;
+
+function renderCards(
+  images: string[],
+  keyPrefix: string,
+) {
+  return images.map((img, i) => (
+    <Box
+      key={`${keyPrefix}-${i}`}
+      flexShrink={0}
+      w={{ base: "280px", sm: "320px", md: "360px" }}
+      h={{ base: "380px", sm: "420px", md: "460px" }}
+      borderRadius="2xl"
+      overflow="hidden"
+      bg="#5d562c"
+      boxShadow="0 10px 30px -10px rgba(93, 86, 44, 0.2)"
+      borderWidth="1px"
+      borderColor="rgba(93, 86, 44, 0.2)"
+    >
+      <img
+        src={img}
+        alt={`قبل وبعد ${i + 1}`}
+        style={{
+          width: "100%",
+          height: "100%",
+          display: "block",
+          objectFit: "contain",
+        }}
+        draggable={false}
+      />
+    </Box>
+  ));
+}
+
 export default function BeforeAfterSection() {
   const scrollerRef = useRef<HTMLDivElement | null>(null);
-  const isDraggingRef = useRef(false);
-  const dragStartXRef = useRef(0);
-  const dragScrollLeftRef = useRef(0);
+  const isHoverPausedRef = useRef(false);
+  const [isHoverPaused, setIsHoverPaused] = useState(false);
 
-  const scrollCards = (direction: "next" | "prev") => {
-    const el = scrollerRef.current;
-    if (!el) return;
-    const cardWidth = window.innerWidth < 640 ? 296 : window.innerWidth < 768 ? 336 : 376;
-    const offset = direction === "next" ? cardWidth : -cardWidth;
-    el.scrollBy({ left: offset, behavior: "smooth" });
-  };
+  useEffect(() => {
+    isHoverPausedRef.current = isHoverPaused;
+  }, [isHoverPaused]);
 
-  const handlePointerDown = (clientX: number) => {
-    const el = scrollerRef.current;
-    if (!el) return;
-    isDraggingRef.current = true;
-    dragStartXRef.current = clientX;
-    dragScrollLeftRef.current = el.scrollLeft;
-  };
+  useEffect(() => {
+    let rafId = 0;
 
-  const handlePointerMove = (clientX: number) => {
-    const el = scrollerRef.current;
-    if (!el || !isDraggingRef.current) return;
-    const dx = clientX - dragStartXRef.current;
-    el.scrollLeft = dragScrollLeftRef.current - dx;
-  };
+    const tick = () => {
+      const el = scrollerRef.current;
+      if (el && !isHoverPausedRef.current) {
+        el.scrollLeft += SCROLL_PX_PER_FRAME;
+        const half = el.scrollWidth / 2;
+        if (half > 2 && el.scrollLeft >= half - 1) {
+          el.scrollLeft -= half;
+        }
+      }
+      rafId = requestAnimationFrame(tick);
+    };
 
-  const handlePointerUp = () => {
-    isDraggingRef.current = false;
-  };
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  }, []);
 
   return (
     <Box
@@ -85,37 +107,13 @@ export default function BeforeAfterSection() {
         </Text>
       </Container>
 
-      {/* كاروسيل يدوي بالسحب/اللمس + أزرار */}
-      <Box dir="ltr" position="relative" w="100%">
-        <Flex
-          justify="center"
-          gap={2}
-          mb={4}
-          display="flex"
-        >
-          <IconButton
-            aria-label="السابق"
-            onClick={() => scrollCards("prev")}
-            rounded="full"
-            variant="outline"
-            color={BRAND}
-            borderColor="rgba(93, 86, 44, 0.35)"
-          >
-            <ChevronLeft size={18} />
-          </IconButton>
-          <IconButton
-            aria-label="التالي"
-            onClick={() => scrollCards("next")}
-            rounded="full"
-            variant="solid"
-            bg={BRAND}
-            color="white"
-            _hover={{ bg: "#4d4723" }}
-          >
-            <ChevronRight size={18} />
-          </IconButton>
-        </Flex>
-
+      <Box
+        dir="ltr"
+        position="relative"
+        w="100%"
+        onMouseEnter={() => setIsHoverPaused(true)}
+        onMouseLeave={() => setIsHoverPaused(false)}
+      >
         <Box
           ref={scrollerRef}
           display="flex"
@@ -125,48 +123,16 @@ export default function BeforeAfterSection() {
           px={{ base: 4, md: 6 }}
           overflowX="auto"
           overflowY="hidden"
-          scrollSnapType="x mandatory"
           touchAction="pan-x"
           css={{
             WebkitOverflowScrolling: "touch",
             scrollbarWidth: "none",
+            scrollSnapType: "none",
+            "&::-webkit-scrollbar": { display: "none" },
           }}
-          // eslint-disable-next-line react-hooks/refs
-          cursor={isDraggingRef.current ? "grabbing" : "grab"}
-          onMouseDown={(e) => handlePointerDown(e.clientX)}
-          onMouseMove={(e) => handlePointerMove(e.clientX)}
-          onMouseUp={handlePointerUp}
-          onMouseLeave={handlePointerUp}
-          onTouchStart={(e) => handlePointerDown(e.touches[0].clientX)}
-          onTouchMove={(e) => handlePointerMove(e.touches[0].clientX)}
-          onTouchEnd={handlePointerUp}
         >
-          {beforeAfterImages.map((img, i) => (
-            <Box
-              key={`img-${i}`}
-              flexShrink={0}
-              w={{ base: "280px", sm: "320px", md: "360px" }}
-              h={{ base: "380px", sm: "420px", md: "460px" }}
-              scrollSnapAlign="center"
-              borderRadius="2xl"
-              overflow="hidden"
-              bg="#5d562c"
-              boxShadow="0 10px 30px -10px rgba(93, 86, 44, 0.2)"
-              borderWidth="1px"
-              borderColor="rgba(93, 86, 44, 0.2)"
-            >
-              <img
-                src={img}
-                alt={`قبل وبعد ${i + 1}`}
-                style={{
-                  width: "100%",
-                  height: "100%",
-                  display: "block",
-                  objectFit: "contain",
-                }}
-              />
-            </Box>
-          ))}
+          {renderCards(beforeAfterImages, "a")}
+          {renderCards(beforeAfterImages, "b")}
         </Box>
       </Box>
     </Box>

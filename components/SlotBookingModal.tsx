@@ -15,6 +15,7 @@ import { useState, useEffect } from "react";
 import { toaster } from "@/components/ui/toaster";
 import { Clock, User, Phone, CalendarDays, CheckCircle } from "lucide-react";
 import api from "@/lib/axios";
+import { getCurrentDoctorId } from "@/lib/doctor-context";
 import {
     AvailableSlotsResponse,
     Patient,
@@ -44,6 +45,7 @@ export default function SlotBookingModal({
     defaultDate,
     bookingType = "online",
 }: SlotBookingModalProps) {
+    const doctorId = getCurrentDoctorId();
     // Step tracker
     const [step, setStep] = useState<Step>("patient");
 
@@ -116,7 +118,7 @@ export default function SlotBookingModal({
         setSelectedSlot(null);
         try {
             const res = await api.get("/bookings/available-slots", {
-                params: { date: selectedDate },
+                params: { date: selectedDate, ...(doctorId ? { doctorId } : {}) },
             });
             setSlotsData(res.data);
             if (res.data.available) {
@@ -144,6 +146,7 @@ export default function SlotBookingModal({
                 date: selectedDate,
                 timeSlot: selectedSlot,
                 bookingType,
+                ...(doctorId ? { doctorId } : {}),
             });
             const booking: SlotBooking = res.data.booking ?? res.data;
             setCreatedBooking(booking);

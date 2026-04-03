@@ -71,12 +71,16 @@ export default function Navbar() {
     onOpen: onBookingOpen,
     onClose: onBookingClose,
   } = useDisclosure();
-  const isMobile = useBreakpointValue({ base: true, md: false });
+  const isMobile = useBreakpointValue(
+    { base: true, md: false },
+    { fallback: "base" },
+  );
 
   const [mounted, setMounted] = useState(false);
   const [loggedIn, setLoggedIn] = useState(false);
   const [permissions, setPermissions] = useState<string[]>([]);
   const [isFullAdmin, setIsFullAdmin] = useState(false);
+  const [role, setRole] = useState<string>("");
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -89,6 +93,13 @@ export default function Navbar() {
     setLoggedIn(isAdminLoggedIn());
     setPermissions(getCurrentUserPermissions());
     setIsFullAdmin(getIsFullAdmin());
+    try {
+      const rawUser = localStorage.getItem("user");
+      const parsed = rawUser ? JSON.parse(rawUser) : null;
+      setRole(parsed?.role ?? parsed?.user?.role ?? "");
+    } catch {
+      setRole("");
+    }
   }, [mounted]);
 
   const adminLinks = useMemo(
@@ -105,18 +116,21 @@ export default function Navbar() {
   const links = useMemo(() => {
     if (!mounted) return PUBLIC_LINKS;
     if (loggedIn) {
+      if (role === "doctor") return [];
       return [{ name: "لوحة التحكم", href: "/admin/dashboard" }, ...adminLinks];
     }
     return PUBLIC_LINKS;
-  }, [mounted, loggedIn, adminLinks]);
+  }, [mounted, loggedIn, adminLinks, role]);
 
   const handleLogout = () => {
     if (typeof window !== "undefined") {
       localStorage.removeItem("token");
       localStorage.removeItem("user");
+      localStorage.removeItem("selectedDoctorId");
       const expire = "expires=Thu, 01 Jan 1970 00:00:01 GMT; path=/";
       document.cookie = `admin-token=; ${expire}`;
       document.cookie = `admin-token=; ${expire}; path=/admin`;
+      document.cookie = `admin-role=; ${expire}`;
     }
     router.push("/admin/login");
   };

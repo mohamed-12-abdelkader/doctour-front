@@ -5,10 +5,11 @@ import {
 } from '@chakra-ui/react'
 import { useState, useMemo, useEffect, useCallback, type ReactNode } from 'react'
 import { Booking, BookingStatus } from '@/types/booking'
-import { Globe, User, Search, AlertCircle, CheckCircle2, XCircle, ChevronLeft, ChevronRight, Clock, Phone, Mail, CalendarDays, Sparkles } from 'lucide-react'
+import { Globe, User, Search, AlertCircle, CheckCircle2, XCircle, ChevronLeft, ChevronRight, Phone, Mail, CalendarDays, Sparkles } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import api from '@/lib/axios'
 import { toaster } from '@/components/ui/toaster'
+import { canChooseDoctor, getCurrentDoctorId, getCurrentRole, setSelectedDoctorId } from '@/lib/doctor-context'
 
 const MotionRow = motion(Table.Row)
 
@@ -75,13 +76,10 @@ export default function OnlineBookingsPage() {
         return d
     })
     const [cancelId, setCancelId] = useState<string | number | null>(null)
-    /** معطيات الـ response بعد تأكيد الحجز — لظهور مودال الموعد المتوقع للكشف */
+    /** بعد تأكيد الحجز — مودال مختصر: تأكيد + دور في الطابور */
     const [confirmResult, setConfirmResult] = useState<{
-        expectedExaminationTime: string
         positionInQueue: number
         totalInDay: number
-        workingHours: { start: string; end: string }
-        customerName: string
     } | null>(null)
 
     /** مودال تأكيد حجز أونلاين — يتطلب date + time من available_slots (الـ API doc) */
@@ -91,6 +89,44 @@ export default function OnlineBookingsPage() {
     const [availableSlots, setAvailableSlots] = useState<string[]>([])
     const [loadingSlots, setLoadingSlots] = useState(false)
     const [submittingConfirm, setSubmittingConfirm] = useState(false)
+    const [doctors, setDoctors] = useState<Array<{ id: number; name?: string; user?: { name?: string } }>>([])
+    const [selectedDoctorId, setDoctorId] = useState<number>(0)
+    const [canSelectDoctor, setCanSelectDoctor] = useState(false)
+
+    useEffect(() => {
+        const role = getCurrentRole()
+        const canSelect = canChooseDoctor(role)
+        setCanSelectDoctor(canSelect)
+        const current = getCurrentDoctorId()
+        if (current) setDoctorId(current)
+    }, [])
+
+    useEffect(() => {
+        if (!canSelectDoctor) return
+        const loadDoctors = async () => {
+            try {
+                const res = await api.get('/doctors')
+                const list = Array.isArray(res.data) ? res.data : (res.data?.doctors ?? [])
+                const arr = Array.isArray(list) ? list : []
+                setDoctors(arr)
+                if (arr.length === 0) return
+                setDoctorId((prev) => {
+                    const ids = new Set(arr.map((d) => d.id))
+                    if (prev > 0 && ids.has(prev)) return prev
+                    return arr[0].id
+                })
+            } catch {
+                setDoctors([])
+            }
+        }
+        loadDoctors()
+    }, [canSelectDoctor])
+
+    /** حفظ الطبيب المختار في localStorage عند اختيار افتراضي أو يدوي */
+    useEffect(() => {
+        if (!canSelectDoctor) return
+        if (selectedDoctorId > 0) setSelectedDoctorId(selectedDoctorId)
+    }, [canSelectDoctor, selectedDoctorId])
 
     const calYear = calViewDate.getFullYear()
     const calMonth = calViewDate.getMonth()
@@ -109,6 +145,7 @@ export default function OnlineBookingsPage() {
             const params: any = {}
             if (filterStatus !== 'all') params.status = filterStatus
             if (filterDate) params.date = filterDate
+            if (selectedDoctorId) params.doctorId = selectedDoctorId
 
             const response = await api.get('/bookings/online', { params })
             setBookings(Array.isArray(response.data) ? response.data : (response.data?.bookings ?? []))
@@ -117,7 +154,7 @@ export default function OnlineBookingsPage() {
         } finally {
             setIsLoading(false)
         }
-    }, [filterStatus, filterDate])
+    }, [filterStatus, filterDate, selectedDoctorId])
 
     // Initial fetch and when filters change
     useEffect(() => {
@@ -126,7 +163,7 @@ export default function OnlineBookingsPage() {
 
     // جلب المواعيد المتاحة عند اختيار تاريخ في مودال التأكيد
     useEffect(() => {
-        if (!confirmOnlineId || !confirmDate) {
+        if (!confirmOnlineId || !confirmDate || !selectedDoctorId) {
             setAvailableSlots([])
             return
         }
@@ -135,7 +172,9 @@ export default function OnlineBookingsPage() {
             setLoadingSlots(true)
             setAvailableSlots([])
             try {
-                const res = await api.get('/bookings/available-slots', { params: { date: confirmDate } })
+                const params: any = { date: confirmDate }
+                if (selectedDoctorId) params.doctorId = selectedDoctorId
+                const res = await api.get('/bookings/available-slots', { params })
                 const slots = res.data?.available_slots ?? res.data?.availableSlots ?? []
                 if (!cancelled) setAvailableSlots(Array.isArray(slots) ? slots : [])
             } catch {
@@ -146,7 +185,7 @@ export default function OnlineBookingsPage() {
         }
         run()
         return () => { cancelled = true }
-    }, [confirmOnlineId, confirmDate])
+    }, [confirmOnlineId, confirmDate, selectedDoctorId])
 
     // عند تغيير التاريخ في مودال التأكيد، إعادة اختيار الوقت (السلاطات تخص اليوم)
     useEffect(() => {
@@ -204,7 +243,7 @@ export default function OnlineBookingsPage() {
         })
     }, [bookings, searchQuery])
 
-    type PatchOnlineBody = { status: BookingStatus; date?: string; time?: string }
+    type PatchOnlineBody = { status: BookingStatus; date?: string; time?: string; doctorId?: number }
 
     const patchOnlineStatus = async (id: string | number, body: PatchOnlineBody) => {
         const newStatus = body.status
@@ -222,13 +261,10 @@ export default function OnlineBookingsPage() {
                 ))
             }
 
-            if (newStatus === 'confirmed' && data?.expectedExaminationTime != null) {
+            if (newStatus === 'confirmed') {
                 setConfirmResult({
-                    expectedExaminationTime: data.expectedExaminationTime ?? '',
-                    positionInQueue: data.positionInQueue ?? 0,
-                    totalInDay: data.totalInDay ?? 0,
-                    workingHours: data.workingHours ?? { start: '—', end: '—' },
-                    customerName: data.booking?.customerName ?? data.customerName ?? 'العميل',
+                    positionInQueue: Number(data?.positionInQueue ?? data?.booking?.positionInQueue ?? 0),
+                    totalInDay: Number(data?.totalInDay ?? data?.booking?.totalInDay ?? 0),
                 })
             }
         } catch (error: any) {
@@ -262,16 +298,25 @@ export default function OnlineBookingsPage() {
             })
             return
         }
+        if (!selectedDoctorId) {
+            toaster.create({
+                title: 'اختر الطبيب أولاً',
+                description: 'تأكيد الحجز الأونلاين يتطلب اختيار الطبيب.',
+                type: 'warning',
+                duration: 3000,
+            })
+            return
+        }
         setSubmittingConfirm(true)
         try {
             await patchOnlineStatus(confirmOnlineId, {
                 status: 'confirmed',
                 date: confirmDate,
                 time: confirmTime,
+                doctorId: selectedDoctorId,
             })
             setConfirmOnlineId(null)
             setConfirmTime('')
-            toaster.create({ title: 'تم تأكيد الحجز', type: 'success', duration: 2000 })
         } catch {
             /* toaster في patchOnlineStatus */
         } finally {
@@ -634,6 +679,42 @@ export default function OnlineBookingsPage() {
                             </Box>
                         )}
                     </Card.Root>
+                    {canSelectDoctor && (
+                        <Box
+                            bg="gray.50"
+                            border="1px solid"
+                            borderColor="gray.200"
+                            borderRadius="lg"
+                            minW={{ base: '100%', md: '260px' }}
+                            px={1}
+                            py={1}
+                        >
+                            <select
+                                value={selectedDoctorId || ''}
+                                onChange={(e) => {
+                                    const id = Number(e.target.value) || 0
+                                    setDoctorId(id)
+                                    setSelectedDoctorId(id || null)
+                                }}
+                                style={{
+                                    width: '100%',
+                                    background: 'transparent',
+                                    border: 'none',
+                                    outline: 'none',
+                                    padding: '8px 10px',
+                                    color: '#374151',
+                                    fontSize: '14px',
+                                }}
+                            >
+                                <option value="">كل الأطباء</option>
+                                {doctors.map((doc) => (
+                                    <option key={doc.id} value={doc.id}>
+                                        {doc.user?.name || doc.name || `Doctor #${doc.id}`}
+                                    </option>
+                                ))}
+                            </select>
+                        </Box>
+                    )}
                     <Flex
                         bg="gray.50"
                         p={1.5}
@@ -1016,6 +1097,45 @@ export default function OnlineBookingsPage() {
                                 <VStack gap={4} align="stretch">
                                     <Box>
                                         <Text fontSize="sm" color="gray.600" mb={2} fontWeight="medium">
+                                            الطبيب
+                                        </Text>
+                                        {canSelectDoctor ? (
+                                            <select
+                                                value={selectedDoctorId || ''}
+                                                onChange={(e) => {
+                                                    const id = Number(e.target.value) || 0
+                                                    setDoctorId(id)
+                                                    setSelectedDoctorId(id || null)
+                                                    setConfirmTime('')
+                                                    setAvailableSlots([])
+                                                }}
+                                                style={{
+                                                    width: '100%',
+                                                    minHeight: '44px',
+                                                    padding: '0 12px',
+                                                    borderRadius: '8px',
+                                                    border: '1px solid #E2E8F0',
+                                                    backgroundColor: '#F7FAFC',
+                                                    fontSize: '14px',
+                                                }}
+                                            >
+                                                <option value="">— اختر الطبيب —</option>
+                                                {doctors.map((doc) => (
+                                                    <option key={doc.id} value={doc.id}>
+                                                        {doc.user?.name || doc.name || `Doctor #${doc.id}`}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        ) : (
+                                            <Text fontSize="sm" color="gray.700" bg="gray.50" p={3} borderRadius="md">
+                                                {selectedDoctorId
+                                                    ? `الطبيب المحدد: #${selectedDoctorId}`
+                                                    : 'لا يوجد طبيب مرتبط بالحساب الحالي'}
+                                            </Text>
+                                        )}
+                                    </Box>
+                                    <Box>
+                                        <Text fontSize="sm" color="gray.600" mb={2} fontWeight="medium">
                                             التاريخ
                                         </Text>
                                         <Input
@@ -1031,7 +1151,11 @@ export default function OnlineBookingsPage() {
                                         <Text fontSize="sm" color="gray.600" mb={2} fontWeight="medium">
                                             وقت الحجز
                                         </Text>
-                                        {loadingSlots ? (
+                                        {!selectedDoctorId ? (
+                                            <Text fontSize="sm" color="orange.600" bg="orange.50" p={3} borderRadius="md">
+                                                اختر الطبيب أولاً لعرض المواعيد المتاحة.
+                                            </Text>
+                                        ) : loadingSlots ? (
                                             <Flex align="center" gap={2} py={2}>
                                                 <Spinner size="sm" />
                                                 <Text fontSize="sm" color="gray.500">جاري جلب المواعيد...</Text>
@@ -1072,7 +1196,7 @@ export default function OnlineBookingsPage() {
                                         color="white"
                                         _hover={{ bg: BRAND.primaryMuted }}
                                         loading={submittingConfirm}
-                                        disabled={!confirmDate || !confirmTime || availableSlots.length === 0 || loadingSlots}
+                                        disabled={!selectedDoctorId || !confirmDate || !confirmTime || availableSlots.length === 0 || loadingSlots}
                                     >
                                         تأكيد الحجز
                                     </Button>
@@ -1095,7 +1219,7 @@ export default function OnlineBookingsPage() {
                     </Portal>
                 </Dialog.Root>
 
-                {/* مودال الموعد المتوقع للكشف بعد تأكيد الحجز */}
+                {/* بعد تأكيد الحجز — تم التأكيد + دور في الطابور فقط */}
                 <Dialog.Root open={!!confirmResult} onOpenChange={(e) => !e.open && setConfirmResult(null)}>
                     <Portal>
                         <Dialog.Backdrop
@@ -1122,45 +1246,21 @@ export default function OnlineBookingsPage() {
                                 boxShadow="2xl"
                                 width={{ base: "90%", md: "400px" }}
                                 p={6}
-                                textAlign="right"
+                                textAlign="center"
                             >
                                 <Box color="green.500" mb={4} display="flex" justifyContent="center">
                                     <CheckCircle2 size={48} />
                                 </Box>
-                                <Heading size="lg" mb={2} color="gray.800">
+                                <Heading size="lg" mb={4} color="gray.800">
                                     تم تأكيد الحجز
                                 </Heading>
                                 {confirmResult && (
-                                    <>
-                                        <Text color="gray.600" mb={3}>
-                                            {confirmResult.customerName}
-                                        </Text>
-                                        <Box
-                                            bg="#6f6a40"
-                                            color="white"
-                                            p={4}
-                                            borderRadius="xl"
-                                            mb={4}
-                                        >
-                                            <Flex align="center" gap={2} mb={2}>
-                                                <Clock size={22} />
-                                                <Text fontWeight="bold" fontSize="lg">
-                                                    الموعد المتوقع للكشف
-                                                </Text>
-                                            </Flex>
-                                            <Text fontSize="2xl" fontWeight="bold" fontFamily="monospace" dir="ltr">
-                                                {formatTime12(confirmResult.expectedExaminationTime)}
-                                            </Text>
-                                        </Box>
-                                        <Flex gap={4} flexWrap="wrap" mb={4} fontSize="sm" color="gray.600">
-                                            <Text>
-                                                ترتيب في الطابور: <strong>{confirmResult.positionInQueue}</strong> من {confirmResult.totalInDay}
-                                            </Text>
-                                            <Text>
-                                                ساعات العمل: <strong dir="ltr">{formatTime12(confirmResult.workingHours.start)}</strong> — <strong dir="ltr">{formatTime12(confirmResult.workingHours.end)}</strong>
-                                            </Text>
-                                        </Flex>
-                                    </>
+                                    <Text fontSize="md" color="gray.700" mb={6} lineHeight="tall">
+                                        دوره في الطابور:{' '}
+                                        <strong>
+                                            {confirmResult.positionInQueue} من {confirmResult.totalInDay}
+                                        </strong>
+                                    </Text>
                                 )}
                                 <Button
                                     w="full"

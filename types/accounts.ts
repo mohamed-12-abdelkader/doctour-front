@@ -24,11 +24,22 @@ export interface AccountSummary {
     clientsCount: number;
 }
 
+/** صف واحد في توزيع دخل الحجوزات حسب الطبيب — doctorId null = «بدون طبيب» */
+export interface BookingIncomeByDoctorRow {
+    doctorId: number | null;
+    doctorName: string;
+    specialty?: string | null;
+    amount: number;
+}
+
 // API: GET /accounts/income/bookings — query: month | startDate+endDate | startMonth+endMonth
 export interface BookingsIncomeResponse {
     period: string;
     byCustomer: { customerName: string; amount: number }[];
     total: number;
+    byDoctor?: BookingIncomeByDoctorRow[];
+    /** مجموع صفوف byDoctor — يطابق إجمالي دخل الحجوزات عادة */
+    totalByDoctor?: number;
 }
 
 // API: POST /accounts/income — Body
@@ -58,13 +69,14 @@ export interface AddExpenseBody {
     description: string;
     amount: number;
     /** مستحسن حسب الـ doc */
-    date?: string | null; // YYYY-MM-DD
+    date?: string; // YYYY-MM-DD
     /** backward compat (لو الـ API القديم يستخدم expenseDate) */
-    expenseDate?: string | null; // YYYY-MM-DD
+    expenseDate?: string; // YYYY-MM-DD
+    /** مطلوب حسب الـ doc */
     category_id: number;
-    /** اختياري حسب التعديل الأخير */
-    subcategory_id?: number | null;
-    notes?: string | null;
+    /** مطلوب حسب الـ doc */
+    subcategory_id: number;
+    notes?: string;
 }
 
 export interface ExpenseCategory {
@@ -105,4 +117,7 @@ export interface AccountsSummaryResponse {
     totalIncome: number;
     totalExpenses: number;
     balance: number;
+    incomeFromBookingsByDoctor?: BookingIncomeByDoctorRow[];
+    /** يوضح أن التوزيع بالطبيب للحجوزات فقط، واليدوي/المصروفات على مستوى العيادة */
+    note?: string;
 }

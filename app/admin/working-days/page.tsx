@@ -33,6 +33,12 @@ import {
 } from "lucide-react";
 import api from "@/lib/axios";
 import { WorkingDay } from "@/types/booking";
+import {
+  canChooseDoctor,
+  getCurrentDoctorId,
+  getCurrentRole,
+  setSelectedDoctorId,
+} from "@/lib/doctor-context";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function getTodayDate() {
@@ -129,13 +135,65 @@ export default function WorkingDaysPage() {
   const [editingDay, setEditingDay] = useState<WorkingDay | null>(null);
   const [form, setForm] = useState<WorkingDayFormState>(emptyForm);
   const [isSaving, setIsSaving] = useState(false);
+  const [doctors, setDoctors] = useState<
+    Array<{ id: number; name?: string; user?: { name?: string } }>
+  >([]);
+  const [selectedDoctorId, setDoctorId] = useState<number>(0);
+  const [canSelectDoctor, setCanSelectDoctor] = useState(false);
+  const [roleResolved, setRoleResolved] = useState(false);
+
+  useEffect(() => {
+    const role = getCurrentRole();
+    const canSelect = canChooseDoctor(role);
+    setCanSelectDoctor(canSelect);
+    const current = getCurrentDoctorId();
+    if (current) setDoctorId(current);
+    setRoleResolved(true);
+  }, []);
+
+  useEffect(() => {
+    if (!canSelectDoctor) return;
+    const loadDoctors = async () => {
+      try {
+        const res = await api.get("/doctors");
+        const list = Array.isArray(res.data) ? res.data : (res.data?.doctors ?? []);
+        const arr = Array.isArray(list) ? list : [];
+        setDoctors(arr);
+        if (arr.length === 0) return;
+        setDoctorId((prev) => {
+          const ids = new Set(arr.map((d) => d.id));
+          if (prev > 0 && ids.has(prev)) return prev;
+          return arr[0].id;
+        });
+      } catch {
+        setDoctors([]);
+      }
+    };
+    loadDoctors();
+  }, [canSelectDoctor]);
+
+  useEffect(() => {
+    if (!canSelectDoctor) return;
+    if (selectedDoctorId > 0) {
+      setSelectedDoctorId(selectedDoctorId);
+    }
+  }, [canSelectDoctor, selectedDoctorId]);
 
   // ── API ──────────────────────────────────────────────────────────────────
   const fetchWorkingDays = async () => {
+    if (!roleResolved) return;
+    if (canSelectDoctor && !selectedDoctorId) {
+      setWorkingDays([]);
+      return;
+    }
     setIsLoading(true);
     try {
       const response = await api.get("/admin/working-days", {
-        params: { startDate: rangeStart, endDate: rangeEnd },
+        params: {
+          startDate: rangeStart,
+          endDate: rangeEnd,
+          ...(selectedDoctorId ? { doctorId: selectedDoctorId } : {}),
+        },
       });
       const data = response.data;
       setWorkingDays(Array.isArray(data) ? data : (data.workingDays ?? []));
@@ -154,7 +212,7 @@ export default function WorkingDaysPage() {
   useEffect(() => {
     fetchWorkingDays();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rangeStart, rangeEnd]);
+  }, [rangeStart, rangeEnd, selectedDoctorId, roleResolved]);
 
   // ── Calendar grid ────────────────────────────────────────────────────────
   // Build calendar weeks for the current month view
@@ -254,9 +312,21 @@ export default function WorkingDaysPage() {
       return;
     }
     setIsSaving(true);
+    if (!selectedDoctorId) {
+      toaster.create({
+        title: "اختر الطبيب أولاً",
+        type: "warning",
+        duration: 2000,
+      });
+      setIsSaving(false);
+      return;
+    }
     try {
       if (editingDay) {
-        await api.put(`/admin/working-days/${editingDay.id}`, form);
+        await api.put(`/admin/working-days/${editingDay.id}`, {
+          ...form,
+          doctorId: selectedDoctorId,
+        });
         toaster.create({
           title: "تم تحديث يوم العمل",
           type: "success",
@@ -267,6 +337,7 @@ export default function WorkingDaysPage() {
           date: form.date,
           startTime: form.startTime,
           endTime: form.endTime,
+          doctorId: selectedDoctorId,
         });
         toaster.create({
           title: "تم إضافة يوم العمل",
@@ -293,6 +364,7 @@ export default function WorkingDaysPage() {
     try {
       await api.put(`/admin/working-days/${day.id}`, {
         isActive: !day.isActive,
+        ...(selectedDoctorId ? { doctorId: selectedDoctorId } : {}),
       });
       toaster.create({
         title: day.isActive ? "تم تعطيل يوم العمل" : "تم تفعيل يوم العمل",
@@ -360,6 +432,38 @@ export default function WorkingDaysPage() {
               flexDir={{ base: "column", sm: "row" }}
               flexShrink={0}
             >
+              {canSelectDoctor && (
+                <Box
+                  bg="whiteAlpha.200"
+                  border="1px solid"
+                  borderColor="whiteAlpha.400"
+                  borderRadius="lg"
+                  px={2}
+                >
+                  <select
+                    value={selectedDoctorId || doctors[0]?.id || ""}
+                    onChange={(e) => {
+                      const id = Number(e.target.value);
+                      setDoctorId(id);
+                      setSelectedDoctorId(Number.isNaN(id) ? null : id);
+                    }}
+                    style={{
+                      minWidth: "180px",
+                      padding: "8px",
+                      background: "transparent",
+                      color: "white",
+                      border: "none",
+                      outline: "none",
+                    }}
+                  >
+                    {doctors.map((doc) => (
+                      <option key={doc.id} value={doc.id} style={{ color: "#111827" }}>
+                        {doc.user?.name || doc.name || `Doctor #${doc.id}`}
+                      </option>
+                    ))}
+                  </select>
+                </Box>
+              )}
               <Button
                 variant="ghost"
                 color="white"

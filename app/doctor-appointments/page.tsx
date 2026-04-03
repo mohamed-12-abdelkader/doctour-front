@@ -4,7 +4,10 @@ import {
     Box, Container, Flex, Heading, Text, Input, Table, Badge, IconButton, Button,
     Avatar, MenuRoot, MenuTrigger, MenuContent, MenuItem, Spinner, Card, Stack,
 } from '@chakra-ui/react'
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
+
+/** تحديث تلقائي للقائمة — قريب من «ريال تايم» بدون WebSocket */
+const BOOKINGS_POLL_MS = 10_000
 import { useRouter } from 'next/navigation'
 import {
     Search, FileText, ChevronDown, CheckCircle, XCircle, Clock, Calendar,
@@ -21,7 +24,14 @@ function getIsAdmin(): boolean {
 
 // ─── Calendar helpers ──────────────────────────────────────────────────────────
 const AR_WEEKDAYS = ['السبت', 'الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة']
-const todayStr = new Date().toISOString().split('T')[0]
+const todayStr = formatDateLocal(new Date())
+
+function formatDateLocal(date: Date): string {
+    const y = date.getFullYear()
+    const m = String(date.getMonth() + 1).padStart(2, '0')
+    const d = String(date.getDate()).padStart(2, '0')
+    return `${y}-${m}-${d}`
+}
 
 function buildCalendarDays(year: number, month: number): (Date | null)[] {
     const firstDay = new Date(year, month, 1)
@@ -41,6 +51,7 @@ export default function DoctorAppointments() {
     const [examinationFilter, setExaminationFilter] = useState<'all' | ExaminationStatus>('all')
     const [isLoading, setIsLoading] = useState(true)
     const [isAdmin, setIsAdmin] = useState(false)
+    const [changingExaminationId, setChangingExaminationId] = useState<number | null>(null)
 
     // ── Date range state ──────────────────────────────────────────────────────
     const [rangeStart, setRangeStart] = useState(todayStr)
@@ -79,8 +90,9 @@ export default function DoctorAppointments() {
     }
 
     // ── API ───────────────────────────────────────────────────────────────────
-    const fetchBookings = async () => {
-        setIsLoading(true)
+    const fetchBookings = useCallback(async (opts?: { silent?: boolean }) => {
+        const silent = opts?.silent === true
+        if (!silent) setIsLoading(true)
         try {
             const params: Record<string, string> = {
                 startDate: rangeStart,
@@ -91,18 +103,40 @@ export default function DoctorAppointments() {
             const data = response.data
             setBookings(Array.isArray(data) ? data : (data?.bookings ?? []))
         } catch (error: any) {
-            toaster.create({
-                title: 'خطأ في جلب البيانات',
-                description: error.response?.data?.message || 'حدث خطأ أثناء جلب الحجوزات',
-                type: 'error',
-                duration: 3000,
-            })
+            if (!silent) {
+                toaster.create({
+                    title: 'خطأ في جلب البيانات',
+                    description: error.response?.data?.message || 'حدث خطأ أثناء جلب الحجوزات',
+                    type: 'error',
+                    duration: 3000,
+                })
+            }
         } finally {
-            setIsLoading(false)
+            if (!silent) setIsLoading(false)
         }
-    }
+    }, [rangeStart, rangeEnd])
 
-    useEffect(() => { fetchBookings() }, [rangeStart, rangeEnd])
+    useEffect(() => {
+        void fetchBookings()
+    }, [fetchBookings])
+
+    /** تحديث دوري صامت — يتوقف عند إخفاء التبويب */
+    useEffect(() => {
+        const tick = () => {
+            if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+            void fetchBookings({ silent: true })
+        }
+        const id = window.setInterval(tick, BOOKINGS_POLL_MS)
+        return () => window.clearInterval(id)
+    }, [fetchBookings])
+
+    useEffect(() => {
+        const onVis = () => {
+            if (document.visibilityState === 'visible') void fetchBookings({ silent: true })
+        }
+        document.addEventListener('visibilitychange', onVis)
+        return () => document.removeEventListener('visibilitychange', onVis)
+    }, [fetchBookings])
     useEffect(() => { setIsAdmin(getIsAdmin()) }, [])
 
     // ── Filtered data ─────────────────────────────────────────────────────────
@@ -123,19 +157,22 @@ export default function DoctorAppointments() {
         try {
             await api.patch(`/bookings/online/${id}/status`, { status: newStatus })
             toaster.create({ title: 'تم تحديث الحالة', type: 'success', duration: 2000 })
-            fetchBookings()
+            void fetchBookings({ silent: true })
         } catch (error: any) {
             toaster.create({ title: 'خطأ في تحديث الحالة', description: error.response?.data?.message || 'حدث خطأ', type: 'error', duration: 3000 })
         }
     }
 
     const handleExaminationStatusChange = async (id: number, examinationStatus: ExaminationStatus) => {
+        setChangingExaminationId(id)
         try {
             await api.patch(`/bookings/${id}/examination-status`, { examinationStatus })
             toaster.create({ title: 'تم تحديث حالة الكشف', type: 'success', duration: 2000 })
-            fetchBookings()
+            void fetchBookings({ silent: true })
         } catch (error: any) {
             toaster.create({ title: 'خطأ في تحديث حالة الكشف', description: error.response?.data?.message || 'غير مصرح', type: 'error', duration: 3000 })
+        } finally {
+            setChangingExaminationId(null)
         }
     }
 
@@ -202,6 +239,12 @@ export default function DoctorAppointments() {
 
     const renderExaminationCell = (booking: Booking) => (
         <Flex align="center" gap={2} flexWrap="wrap">
+            {changingExaminationId === booking.id && (
+                <Flex align="center" gap={1} color="gray.500">
+                    <Spinner size="xs" />
+                    <Text fontSize="xs">جارِ التغيير...</Text>
+                </Flex>
+            )}
             {getExaminationStatusBadge(booking.examinationStatus)}
             {isAdmin && (
                 <MenuRoot>
@@ -211,10 +254,19 @@ export default function DoctorAppointments() {
                         </IconButton>
                     </MenuTrigger>
                     <MenuContent>
-                        <MenuItem onClick={() => handleExaminationStatusChange(booking.id, 'waiting')} value="waiting">
+                        <MenuItem
+                            onClick={() => handleExaminationStatusChange(booking.id, 'waiting')}
+                            value="waiting"
+                            disabled={changingExaminationId === booking.id}
+                        >
                             <Clock size={14} /> انتظار
                         </MenuItem>
-                        <MenuItem onClick={() => handleExaminationStatusChange(booking.id, 'done')} value="done" color="green.500">
+                        <MenuItem
+                            onClick={() => handleExaminationStatusChange(booking.id, 'done')}
+                            value="done"
+                            color="green.500"
+                            disabled={changingExaminationId === booking.id}
+                        >
                             <CheckCircle size={14} /> تم الكشف
                         </MenuItem>
                     </MenuContent>
@@ -315,7 +367,7 @@ export default function DoctorAppointments() {
                     >
                         {calendarDays.map((date, idx) => {
                             if (!date) return <Box key={`empty-${idx}`} />
-                            const dateStr = date.toISOString().split('T')[0]
+                            const dateStr = formatDateLocal(date)
                             const isToday = dateStr === todayStr
                             const isStart = dateStr === previewStart
                             const isEnd = dateStr === previewEnd

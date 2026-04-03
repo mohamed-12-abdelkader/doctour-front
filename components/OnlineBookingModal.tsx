@@ -4,6 +4,7 @@ import { Dialog, Button, Input, Text, VStack, Box, Portal, Flex } from '@chakra-
 import { useState, useEffect } from 'react'
 import api from '@/lib/axios'
 import { toaster } from '@/components/ui/toaster'
+import { doctorInfo } from '@/data/services'
 
 interface OnlineBookingModalProps {
     isOpen: boolean
@@ -14,6 +15,7 @@ export default function OnlineBookingModal({ isOpen, onClose }: OnlineBookingMod
     const [name, setName] = useState('')
     const [phone, setPhone] = useState('')
     const [saving, setSaving] = useState(false)
+    const [isSuccessOpen, setIsSuccessOpen] = useState(false)
 
     useEffect(() => {
         if (isOpen) {
@@ -46,6 +48,7 @@ export default function OnlineBookingModal({ isOpen, onClose }: OnlineBookingMod
                 duration: 4000,
             })
             onClose()
+            setIsSuccessOpen(true)
         } catch (error: any) {
             toaster.create({
                 title: 'خطأ في تقديم الحجز',
@@ -59,51 +62,52 @@ export default function OnlineBookingModal({ isOpen, onClose }: OnlineBookingMod
     }
 
     return (
-        <Dialog.Root open={isOpen} onOpenChange={(e) => !e.open && onClose()}>
-            <Portal>
-                <Dialog.Backdrop
-                    bg="blackAlpha.600"
-                    backdropFilter="blur(4px)"
-                    zIndex="1400"
-                    position="fixed"
-                    inset="0"
-                />
-                <Dialog.Positioner
-                    zIndex="1401"
-                    position="fixed"
-                    inset="0"
-                    display="flex"
-                    alignItems="center"
-                    justifyContent="center"
-                    padding={4}
-                >
-                    <Dialog.Content
-                        dir="rtl"
-                        bg="white"
-                        borderRadius="2xl"
-                        overflow="hidden"
-                        boxShadow="2xl"
-                        width={{ base: '95%', md: '400px' }}
-                        outline="none"
+        <>
+            <Dialog.Root open={isOpen} onOpenChange={(e) => !e.open && onClose()}>
+                <Portal>
+                    <Dialog.Backdrop
+                        bg="blackAlpha.600"
+                        backdropFilter="blur(4px)"
+                        zIndex="1400"
+                        position="fixed"
+                        inset="0"
+                    />
+                    <Dialog.Positioner
+                        zIndex="1401"
+                        position="fixed"
+                        inset="0"
+                        display="flex"
+                        alignItems="center"
+                        justifyContent="center"
+                        padding={4}
                     >
-                        {/* Header */}
-                        <Box
-                            bg="#fdfbf7"
-                            px={6} py={4}
-                            borderBottom="1px solid" borderColor="#eee"
-                            display="flex" justifyContent="space-between" alignItems="center"
+                        <Dialog.Content
+                            dir="rtl"
+                            bg="white"
+                            borderRadius="2xl"
+                            overflow="hidden"
+                            boxShadow="2xl"
+                            width={{ base: '95%', md: '400px' }}
+                            outline="none"
                         >
-                            <Text fontSize="xl" color="#615b36" fontWeight="bold">
-                                حجز موعد أونلاين
-                            </Text>
-                            <Dialog.CloseTrigger asChild>
-                                <Button
-                                    size="sm" variant="ghost" color="gray.500"
-                                    _hover={{ bg: 'blackAlpha.50', color: 'red.500' }}
-                                    rounded="full" w={8} h={8} minW={0} p={0}
-                                >✕</Button>
-                            </Dialog.CloseTrigger>
-                        </Box>
+                            {/* Header */}
+                            <Box
+                                bg="#fdfbf7"
+                                px={6} py={4}
+                                borderBottom="1px solid" borderColor="#eee"
+                                display="flex" justifyContent="space-between" alignItems="center"
+                            >
+                                <Text fontSize="xl" color="#615b36" fontWeight="bold">
+                                    حجز موعد أونلاين
+                                </Text>
+                                <Dialog.CloseTrigger asChild>
+                                    <Button
+                                        size="sm" variant="ghost" color="gray.500"
+                                        _hover={{ bg: 'blackAlpha.50', color: 'red.500' }}
+                                        rounded="full" w={8} h={8} minW={0} p={0}
+                                    >✕</Button>
+                                </Dialog.CloseTrigger>
+                            </Box>
 
                         <Box p={6}>
                             <VStack gap={4} align="stretch">
@@ -161,9 +165,59 @@ export default function OnlineBookingModal({ isOpen, onClose }: OnlineBookingMod
 
                             </VStack>
                         </Box>
-                    </Dialog.Content>
-                </Dialog.Positioner>
-            </Portal>
-        </Dialog.Root>
+                        </Dialog.Content>
+                    </Dialog.Positioner>
+                </Portal>
+            </Dialog.Root>
+
+            <Dialog.Root
+                open={isSuccessOpen}
+                onOpenChange={(e) => !e.open && setIsSuccessOpen(false)}
+            >
+                <Portal>
+                    <Dialog.Backdrop bg="blackAlpha.600" />
+                    <Dialog.Positioner>
+                        <Dialog.Content
+                            dir="rtl"
+                            bg="white"
+                            borderRadius="2xl"
+                            boxShadow="2xl"
+                            width={{ base: '95%', md: '460px' }}
+                            p={6}
+                        >
+                            <VStack gap={4} align="stretch">
+                                <Text fontSize="xl" color="#615b36" fontWeight="bold" textAlign="center">
+                                    تم ارسال طلبك بنجاح
+                                </Text>
+                                <Text color="gray.700" textAlign="center" lineHeight="tall">
+                                    تم ارسال طلبك، انتظر مكالمة تاكيد للحجز.
+                                    <br />
+                                    سعداء جدا بزيارتك لموقعنا.
+                                </Text>
+                                <Flex gap={3} mt={2}>
+                                    <Button
+                                        flex={1}
+                                        bg="#25D366"
+                                        color="white"
+                                        _hover={{ bg: '#1daa52' }}
+                                        onClick={() => window.open(doctorInfo.whatsappUrl, '_blank')}
+                                    >
+                                        الانتقال إلى واتساب
+                                    </Button>
+                                    <Button
+                                        flex={1}
+                                        variant="outline"
+                                        colorPalette="gray"
+                                        onClick={() => setIsSuccessOpen(false)}
+                                    >
+                                        إغلاق
+                                    </Button>
+                                </Flex>
+                            </VStack>
+                        </Dialog.Content>
+                    </Dialog.Positioner>
+                </Portal>
+            </Dialog.Root>
+        </>
     )
 }

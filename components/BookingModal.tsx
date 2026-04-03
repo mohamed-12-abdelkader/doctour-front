@@ -10,16 +10,70 @@ import {
   Box,
   Portal,
 } from "@chakra-ui/react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Booking } from "@/types/booking";
 import api from "@/lib/axios";
 import { BOOKING_SERVICES } from "@/data/services";
+
+/** عميل سابق من الحجوزات — لاقتراحات الاسم */
+export interface KnownCustomerHint {
+  customerName: string;
+  customerPhone: string;
+  visitType?: string | null;
+  doctorId?: number | null;
+}
+
+function formatDateLocal(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function hintsFromBookings(bookings: Booking[]): KnownCustomerHint[] {
+  const map = new Map<string, KnownCustomerHint>();
+  for (const b of bookings) {
+    const name = (b.customerName || "").trim();
+    if (!name) continue;
+    const phone = (b.customerPhone || "").trim();
+    const digits = phone.replace(/\D/g, "");
+    const key = digits.length >= 8 ? `p:${digits}` : `n:${name.toLowerCase()}`;
+    if (!map.has(key)) {
+      map.set(key, {
+        customerName: name,
+        customerPhone: phone,
+        visitType: typeof b.visitType === "string" ? b.visitType : null,
+        doctorId: b.doctorId != null ? Number(b.doctorId) : null,
+      });
+    }
+  }
+  return Array.from(map.values());
+}
+
+function mergeKnownCustomerHints(
+  a: KnownCustomerHint[],
+  b: KnownCustomerHint[],
+): KnownCustomerHint[] {
+  const map = new Map<string, KnownCustomerHint>();
+  for (const c of [...a, ...b]) {
+    const name = (c.customerName || "").trim();
+    if (!name) continue;
+    const phone = (c.customerPhone || "").trim();
+    const digits = phone.replace(/\D/g, "");
+    const key = digits.length >= 8 ? `p:${digits}` : `n:${name.toLowerCase()}`;
+    if (!map.has(key)) map.set(key, c);
+  }
+  return Array.from(map.values());
+}
 
 interface BookingModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (booking: any) => void;
   initialData?: Booking | null;
+  doctorId?: number | null;
+  /** اختياري: يُدمج مع نتيجة GET /bookings/all (سنة سابقة) داخل المودال */
+  knownCustomers?: KnownCustomerHint[];
 }
 
 export default function BookingModal({
@@ -27,6 +81,8 @@ export default function BookingModal({
   onClose,
   onSave,
   initialData,
+  doctorId,
+  knownCustomers = [],
 }: BookingModalProps) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -36,6 +92,80 @@ export default function BookingModal({
   const [visitType, setVisitType] = useState<string>(BOOKING_SERVICES[0] ?? "");
   const [availableSlots, setAvailableSlots] = useState<string[]>([]);
   const [isLoadingSlots, setIsLoadingSlots] = useState(false);
+  const [doctors, setDoctors] = useState<Array<{ id: number; name?: string; user?: { name?: string } }>>([]);
+  const [selectedDoctorId, setSelectedDoctorId] = useState<number>(0);
+  const [nameFocused, setNameFocused] = useState(false);
+  const blurTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [apiKnownCustomers, setApiKnownCustomers] = useState<KnownCustomerHint[]>(
+    [],
+  );
+
+  const mergedKnownCustomers = useMemo(
+    () => mergeKnownCustomerHints(knownCustomers, apiKnownCustomers),
+    [knownCustomers, apiKnownCustomers],
+  );
+
+  const nameSuggestions = useMemo(() => {
+    if (initialData || !mergedKnownCustomers.length) return [];
+    const q = name.trim();
+    if (q.length < 1) return [];
+    const qLower = q.toLowerCase();
+    const qDigits = q.replace(/\D/g, "");
+    const out: KnownCustomerHint[] = [];
+    const seen = new Set<string>();
+    for (const c of mergedKnownCustomers) {
+      const n = (c.customerName || "").trim();
+      const p = (c.customerPhone || "").trim();
+      const pDigits = p.replace(/\D/g, "");
+      const nameMatch = n.toLowerCase().includes(qLower);
+      const phoneMatch =
+        qDigits.length >= 2 && pDigits.length > 0 && pDigits.includes(qDigits);
+      if (!nameMatch && !phoneMatch) continue;
+      const key = pDigits.length >= 6 ? `p:${pDigits}` : `n:${n.toLowerCase()}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        customerName: n,
+        customerPhone: p,
+        visitType: c.visitType,
+        doctorId: c.doctorId,
+      });
+      if (out.length >= 10) break;
+    }
+    return out;
+  }, [name, mergedKnownCustomers, initialData]);
+
+  const showSuggestionList =
+    !initialData && nameFocused && nameSuggestions.length > 0;
+
+  const applyCustomerHint = (c: KnownCustomerHint) => {
+    setName(c.customerName);
+    setPhone(c.customerPhone || "");
+    const vt = c.visitType;
+    if (vt && typeof vt === "string") {
+      setVisitType(vt);
+    }
+    const docId = Number(c.doctorId ?? 0);
+    if (docId > 0 && doctors.some((d) => d.id === docId)) {
+      setSelectedDoctorId(docId);
+      setTime("");
+      setAvailableSlots([]);
+    }
+  };
+
+  const formatSlotTo12Hour = (slot: string) => {
+    const [hoursPart = "0", minutesPart = "0"] = slot.split(":");
+    const hours = Number(hoursPart);
+    const minutes = Number(minutesPart);
+
+    if (Number.isNaN(hours) || Number.isNaN(minutes)) return slot;
+
+    const period = hours >= 12 ? "PM" : "AM";
+    const hour12 = hours % 12 || 12;
+    const minutesPadded = String(minutes).padStart(2, "0");
+
+    return `${hour12}:${minutesPadded} ${period}`;
+  };
 
   // Reset state when modal opens/closes
   useEffect(() => {
@@ -54,18 +184,17 @@ export default function BookingModal({
             ? initialData.amountPaid
             : initialData.amountPaid?.toString() || "0";
         setAmountPaid(amount);
+        setSelectedDoctorId(
+          Number((initialData as any).doctorId ?? doctorId ?? 0),
+        );
 
-        const timeString = initialData.appointmentDate || "";
+        const appointmentDateTime = initialData.appointmentDate || "";
 
-        if (timeString && timeString.includes("T")) {
-          const d = new Date(timeString);
-          setDate(d.toISOString().split("T")[0]);
-          setTime(
-            d.toLocaleTimeString("en-GB", {
-              hour: "2-digit",
-              minute: "2-digit",
-            }),
-          );
+        if (appointmentDateTime && appointmentDateTime.includes("T")) {
+          const [rawDate = "", rawTime = ""] = appointmentDateTime.split("T");
+          const timeFromIso = rawTime.slice(0, 5);
+          setDate(rawDate || new Date().toISOString().split("T")[0]);
+          setTime(timeFromIso || "");
         } else {
           setDate(new Date().toISOString().split("T")[0]);
           setTime("");
@@ -79,14 +208,64 @@ export default function BookingModal({
         setAmountPaid("0");
         setVisitType(BOOKING_SERVICES[0] ?? "");
         setAvailableSlots([]);
+        setSelectedDoctorId(Number(doctorId ?? 0));
       }
     }
-  }, [isOpen, initialData]);
+  }, [isOpen, initialData, doctorId]);
+
+  /** اقتراحات من أرشيف الحجوزات (سنة) — نفس مسار today-bookings */
+  useEffect(() => {
+    if (!isOpen || initialData) {
+      setApiKnownCustomers([]);
+      return;
+    }
+    let cancelled = false;
+    const run = async () => {
+      const end = new Date();
+      const start = new Date();
+      start.setFullYear(start.getFullYear() - 1);
+      const params: Record<string, string | number> = {
+        startDate: formatDateLocal(start),
+        endDate: formatDateLocal(end),
+      };
+      const docId = Number(doctorId ?? 0);
+      if (!Number.isNaN(docId) && docId > 0) params.doctorId = docId;
+      try {
+        const res = await api.get("/bookings/all", { params });
+        const data = res.data;
+        const list: Booking[] = Array.isArray(data)
+          ? data
+          : (data?.bookings ?? []);
+        if (cancelled) return;
+        setApiKnownCustomers(hintsFromBookings(list));
+      } catch {
+        if (!cancelled) setApiKnownCustomers([]);
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, initialData, doctorId]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const loadDoctors = async () => {
+      try {
+        const res = await api.get("/doctors");
+        const list = Array.isArray(res.data) ? res.data : (res.data?.doctors ?? []);
+        setDoctors(Array.isArray(list) ? list : []);
+      } catch {
+        setDoctors([]);
+      }
+    };
+    loadDoctors();
+  }, [isOpen]);
 
   // Fetch available slots when date changes (or modal opens)
   useEffect(() => {
     const fetchSlots = async () => {
-      if (!isOpen || !date) {
+      if (!isOpen || !date || !selectedDoctorId) {
         setAvailableSlots([]);
         return;
       }
@@ -94,7 +273,7 @@ export default function BookingModal({
       setAvailableSlots([]);
       try {
         const res = await api.get("/bookings/available-slots", {
-          params: { date },
+          params: { date, doctorId: selectedDoctorId },
         });
         const slots =
           res.data?.available_slots ?? res.data?.availableSlots ?? [];
@@ -106,11 +285,25 @@ export default function BookingModal({
       }
     };
     fetchSlots();
-  }, [isOpen, date]);
+  }, [isOpen, date, selectedDoctorId]);
+
+  useEffect(() => {
+    if (!isOpen) setNameFocused(false);
+  }, [isOpen]);
+
+  useEffect(() => {
+    return () => {
+      if (blurTimeoutRef.current) clearTimeout(blurTimeoutRef.current);
+    };
+  }, []);
 
   const handleSave = () => {
     if (!name || !date || !phone) {
       alert("يرجى ملء جميع الحقول المطلوبة");
+      return;
+    }
+    if (!selectedDoctorId) {
+      alert("يرجى اختيار الطبيب");
       return;
     }
     if (!time) {
@@ -123,6 +316,7 @@ export default function BookingModal({
       phone,
       date, // YYYY-MM-DD
       time: time, // HH:mm — من available-slots
+      doctorId: selectedDoctorId,
       amountPaid: parseFloat(amountPaid) || 0,
       visitType,
     };
@@ -204,19 +398,87 @@ export default function BookingModal({
               minH={0}
             >
               <VStack gap={{ base: 3, md: 4 }} align="stretch">
-                <Box>
+                <Box position="relative">
                   <Text fontSize="sm" color="gray.600" mb={2}>
                     اسم العميل
                   </Text>
                   <Input
-                    placeholder="الاسم ثلاثي"
+                    placeholder="الاسم ثلاثي — اكتب لعرض عملاء سابقين"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
+                    onFocus={() => {
+                      if (blurTimeoutRef.current) {
+                        clearTimeout(blurTimeoutRef.current);
+                        blurTimeoutRef.current = null;
+                      }
+                      setNameFocused(true);
+                    }}
+                    onBlur={() => {
+                      blurTimeoutRef.current = setTimeout(() => {
+                        setNameFocused(false);
+                      }, 180);
+                    }}
                     bg="gray.50"
                     borderColor="gray.200"
                     _focus={{ borderColor: "#615b36", bg: "white" }}
                     minH={{ base: "44px", sm: "40px" }}
+                    autoComplete="off"
                   />
+                  {showSuggestionList && (
+                    <Box
+                      position="absolute"
+                      left={0}
+                      right={0}
+                      top="100%"
+                      mt={1}
+                      zIndex={20}
+                      bg="white"
+                      border="1px solid"
+                      borderColor="gray.200"
+                      borderRadius="md"
+                      boxShadow="md"
+                      maxH="220px"
+                      overflowY="auto"
+                    >
+                      <Text
+                        fontSize="xs"
+                        color="gray.500"
+                        px={3}
+                        py={2}
+                        borderBottom="1px solid"
+                        borderColor="gray.100"
+                      >
+                        عملاء سبق تسجيلهم
+                      </Text>
+                      {nameSuggestions.map((c, idx) => (
+                        <Box
+                          key={`${c.customerPhone}-${c.customerName}-${idx}`}
+                          px={3}
+                          py={2}
+                          cursor="pointer"
+                          _hover={{ bg: "gray.50" }}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            if (blurTimeoutRef.current) {
+                              clearTimeout(blurTimeoutRef.current);
+                              blurTimeoutRef.current = null;
+                            }
+                            applyCustomerHint(c);
+                            setNameFocused(false);
+                          }}
+                        >
+                          <Text fontWeight="medium" color="gray.800">
+                            {c.customerName}
+                          </Text>
+                          {c.customerPhone ? (
+                            <Text fontSize="sm" color="gray.500" dir="ltr" textAlign="right">
+                              {c.customerPhone}
+                            </Text>
+                          ) : null}
+                        </Box>
+                      ))}
+                    </Box>
+                  )}
                 </Box>
 
                 <Box>
@@ -233,6 +495,38 @@ export default function BookingModal({
                     _focus={{ borderColor: "#615b36", bg: "white" }}
                     minH={{ base: "44px", sm: "40px" }}
                   />
+                </Box>
+
+                <Box>
+                  <Text fontSize="sm" color="gray.600" mb={2}>
+                    الطبيب
+                  </Text>
+                  <select
+                    value={selectedDoctorId}
+                    onChange={(e) => {
+                      setSelectedDoctorId(Number(e.target.value) || 0);
+                      setTime("");
+                      setAvailableSlots([]);
+                    }}
+                    style={{
+                      width: "100%",
+                      padding: "0.625rem 0.5rem",
+                      borderRadius: "0.375rem",
+                      border: "1px solid",
+                      borderColor: "#E2E8F0",
+                      backgroundColor: "#F7FAFC",
+                      fontSize: "1rem",
+                      outline: "none",
+                      minHeight: "44px",
+                    }}
+                  >
+                    <option value={0}>اختر الطبيب</option>
+                    {doctors.map((doc) => (
+                      <option key={doc.id} value={doc.id}>
+                        {doc.user?.name || doc.name || `Doctor #${doc.id}`}
+                      </option>
+                    ))}
+                  </select>
                 </Box>
 
                 <Box>
@@ -305,7 +599,7 @@ export default function BookingModal({
                           </option>
                           {availableSlots.map((slot) => (
                             <option key={slot} value={slot}>
-                              {slot}
+                              {formatSlotTo12Hour(slot)}
                             </option>
                           ))}
                         </select>

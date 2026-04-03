@@ -1,5 +1,7 @@
 /** قائمة أنواع الحجز / الخدمات — تُستخدم في BookingModal و ServicesSection */
 export const BOOKING_SERVICES = [
+  "كشف",
+  "متابعة",
   "Botox",
   "filler",
   "تنعيم علاجي للشعر",

@@ -45,15 +45,23 @@ export default function AdminLoginPage() {
                 // Save to Local Storage as requested
                 localStorage.setItem('token', data.token);
                 localStorage.setItem('user', JSON.stringify(data));
+                const role = data?.role ?? data?.user?.role ?? '';
+                const doctorId = Number(data?.doctorProfile?.id ?? data?.user?.doctorProfile?.id ?? 0);
+                if (!Number.isNaN(doctorId) && doctorId > 0) {
+                    localStorage.setItem('selectedDoctorId', String(doctorId));
+                } else {
+                    localStorage.removeItem('selectedDoctorId');
+                }
 
                 // Set a cookie for the existing Middleware to allow access to /admin routes
                 // Set a cookie for the existing Middleware to allow access to /admin routes
                 // Note: Removed 'Secure' for localhost development compatibility. 
                 // In production with HTTPS, 'Secure' should be added back.
                 document.cookie = `admin-token=${data.token}; path=/; max-age=86400; SameSite=Lax`;
+                document.cookie = `admin-role=${role}; path=/; max-age=86400; SameSite=Lax`;
 
                 setTimeout(() => {
-                    window.location.href = '/admin/dashboard';
+                    window.location.href = role === 'doctor' ? '/doctor-appointments' : '/admin/dashboard';
                 }, 500);
             } else {
                 throw new Error('No token received');

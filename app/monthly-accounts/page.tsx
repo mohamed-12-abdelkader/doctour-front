@@ -34,8 +34,8 @@ import {
     Layers,
     Trash2,
     RefreshCw,
-    ChevronDown,
-    ChevronUp,
+    Info,
+    Stethoscope,
 } from 'lucide-react'
 import {
     BookingsIncomeResponse,
@@ -46,6 +46,7 @@ import {
     AddExpenseBody,
     ExpenseCategory,
     ExpenseSubcategory,
+    BookingIncomeByDoctorRow,
 } from '@/types/accounts'
 import api from '@/lib/axios'
 import { toaster } from '@/components/ui/toaster'
@@ -142,6 +143,12 @@ function messageFromApi(error: unknown, fallback: string): string {
     return typeof m === 'string' && m.trim() ? m.trim() : fallback
 }
 
+function doctorRowLabel(row: BookingIncomeByDoctorRow): string {
+    if (row.doctorId == null) return 'بدون طبيب'
+    const n = row.doctorName?.trim()
+    return n || `طبيب #${row.doctorId}`
+}
+
 type PeriodMode = 'month' | 'days' | 'months'
 
 export default function MonthlyAccountsPage() {
@@ -212,7 +219,7 @@ export default function MonthlyAccountsPage() {
         notes: '',
         date: getToday(),
         category_id: 0,
-        subcategory_id: null,
+        subcategory_id: 0,
     })
     const [expenseCategories, setExpenseCategories] = useState<ExpenseCategory[]>([])
     const [expenseSubcategories, setExpenseSubcategories] = useState<ExpenseSubcategory[]>([])
@@ -225,12 +232,6 @@ export default function MonthlyAccountsPage() {
     const [creatingCategory, setCreatingCategory] = useState(false)
     const [creatingSubFor, setCreatingSubFor] = useState<number | null>(null)
     const [deletingId, setDeletingId] = useState<{ kind: 'cat' | 'sub'; id: number } | null>(null)
-    const [expandedCategories, setExpandedCategories] = useState<Record<number, boolean>>({})
-    const [isTaxonomyExpanded, setIsTaxonomyExpanded] = useState(false)
-
-    const toggleCategory = (id: number) => {
-        setExpandedCategories(prev => ({ ...prev, [id]: !prev[id] }))
-    }
 
     /** معاملات الفترة — مطابقة لـ getPeriodRange في الـ backend (doc §3) */
     const periodParams = useMemo(() => {
@@ -467,7 +468,7 @@ export default function MonthlyAccountsPage() {
             setExpenseForm((p) => ({
                 ...p,
                 category_id: categoryId,
-                subcategory_id: null,
+                subcategory_id: subs[0]?.id ?? 0,
             }))
         } catch (error: unknown) {
             toaster.create({
@@ -531,7 +532,7 @@ export default function MonthlyAccountsPage() {
     }
 
     const handleAddExpense = async () => {
-        if (!expenseForm.description?.trim() || expenseForm.amount <= 0 || !expenseForm.category_id) {
+        if (!expenseForm.description?.trim() || expenseForm.amount <= 0 || !expenseForm.category_id || !expenseForm.subcategory_id) {
             toaster.create({ title: 'أدخل الوصف والمبلغ', type: 'warning', duration: 2000 })
             return
         }
@@ -541,10 +542,8 @@ export default function MonthlyAccountsPage() {
                 description: expenseForm.description.trim(),
                 amount: expenseForm.amount,
                 category_id: expenseForm.category_id,
-                subcategory_id: expenseForm.subcategory_id || null,
-                date: expenseForm.date || getToday(),
-                expense_date: expenseForm.date || getToday(),
-                expenseDate: expenseForm.date || getToday(),
+                subcategory_id: expenseForm.subcategory_id,
+                ...(expenseForm.date ? { date: expenseForm.date } : {}),
                 notes: expenseForm.notes?.trim() || undefined,
             })
             toaster.create({ title: 'تم إضافة المصروف بنجاح', type: 'success', duration: 2000 })
@@ -555,7 +554,7 @@ export default function MonthlyAccountsPage() {
                 date: getToday(),
                 notes: '',
                 category_id: expenseForm.category_id || expenseCategories[0]?.id || 0,
-                subcategory_id: null,
+                subcategory_id: expenseForm.subcategory_id || expenseSubcategories[0]?.id || 0,
             })
             fetchAll()
         } catch (error: unknown) {
@@ -737,67 +736,188 @@ export default function MonthlyAccountsPage() {
                             </SimpleGrid>
                         )}
 
+                        {summary?.note && (
+                            <Flex
+                                align="start"
+                                gap={3}
+                                mb={6}
+                                p={4}
+                                bg="blue.50"
+                                borderRadius="xl"
+                                border="1px solid"
+                                borderColor="blue.100"
+                            >
+                                <Box color="blue.600" flexShrink={0} mt={0.5}>
+                                    <Info size={20} />
+                                </Box>
+                                <Text fontSize="sm" color="gray.700" lineHeight="tall">
+                                    {summary.note}
+                                </Text>
+                            </Flex>
+                        )}
+
+                        {summary && summary.incomeFromBookingsByDoctor && summary.incomeFromBookingsByDoctor.length > 0 && (
+                            <Card.Root bg="white" shadow="md" borderRadius="xl" overflow="hidden" mb={8}>
+                                <Card.Header bg="#fdfbf7" borderBottom="1px solid" borderColor="gray.100" py={4} px={5}>
+                                    <Heading size="md" color="#615b36" display="flex" alignItems="center" gap={2}>
+                                        <Stethoscope size={20} />
+                                        توزيع دخل الحجوزات حسب الطبيب (ملخص العيادة)
+                                    </Heading>
+                                    <Text fontSize="sm" color="gray.500" mt={1} fontWeight="normal">
+                                        الدخل اليدوي والمصروفات تظهر في الملخص أعلاه على مستوى العيادة فقط — هذا الجدول يخص حجوزات الفترة فقط.
+                                    </Text>
+                                </Card.Header>
+                                <Card.Body p={5}>
+                                    <Box overflowX="auto">
+                                        <Table.Root size="sm">
+                                            <Table.Header bg="gray.50">
+                                                <Table.Row>
+                                                    <Table.ColumnHeader py={3} px={3} textAlign="right">الطبيب</Table.ColumnHeader>
+                                                    <Table.ColumnHeader py={3} px={3} textAlign="right">المبلغ</Table.ColumnHeader>
+                                                </Table.Row>
+                                            </Table.Header>
+                                            <Table.Body>
+                                                {summary.incomeFromBookingsByDoctor.map((row, i) => (
+                                                    <Table.Row key={row.doctorId ?? `none-${i}`}>
+                                                        <Table.Cell py={3} px={3}>{doctorRowLabel(row)}</Table.Cell>
+                                                        <Table.Cell py={3} px={3} fontWeight="bold" color="#615b36">
+                                                            {formatAmount(row.amount)} EGP
+                                                        </Table.Cell>
+                                                    </Table.Row>
+                                                ))}
+                                            </Table.Body>
+                                        </Table.Root>
+                                    </Box>
+                                    <Flex justify="space-between" align="center" pt={3} mt={3} borderTop="2px solid" borderColor="gray.100">
+                                        <Text fontWeight="bold" color="gray.700">إجمالي دخل الحجوزات</Text>
+                                        <Text fontWeight="bold" fontSize="lg" color="#615b36">{formatAmount(summary.incomeFromBookings)} EGP</Text>
+                                    </Flex>
+                                </Card.Body>
+                            </Card.Root>
+                        )}
+
                         <SimpleGrid columns={{ base: 1, lg: 2 }} gap={8}>
-                            {/* دخل الحجوزات */}
+                            {/* دخل الحجوزات — حسب الطبيب + حسب العميل */}
                             <Card.Root bg="white" shadow="md" borderRadius="xl" overflow="hidden">
                                 <Card.Header bg="#fdfbf7" borderBottom="1px solid" borderColor="gray.100" py={4} px={5}>
                                     <Heading size="md" color="#615b36" display="flex" alignItems="center" gap={2}>
                                         <Receipt size={20} />
-                                        دخل الحجوزات (تجميع بالعميل)
+                                        دخل الحجوزات
                                     </Heading>
+                                    <Text fontSize="sm" color="gray.500" mt={1} fontWeight="normal">
+                                        تفصيل API: حسب الطبيب ثم حسب العميل.
+                                    </Text>
                                 </Card.Header>
                                 <Card.Body p={5}>
-                                    <Flex justify="space-between" align="center" mb={4} flexWrap="wrap" gap={3}>
-                                        <Text fontWeight="bold" color="gray.600" fontSize="sm">الفلترة حسب الإجراء</Text>
-                                        <Box bg="gray.50" border="1px solid" borderColor="gray.200" borderRadius="lg" px={2} minW="200px">
-                                            <select
-                                                value={filterProcedure}
-                                                onChange={(e) => setFilterProcedure(e.target.value)}
-                                                style={{ width: '100%', padding: '6px', background: 'transparent', outline: 'none' }}
-                                            >
-                                                <option value="all">الكل</option>
-                                                <option value="none">بدون إجراء</option>
-                                                {bookingsProceduresList.map(p => (
-                                                    <option key={p} value={p}>{p}</option>
-                                                ))}
-                                            </select>
-                                        </Box>
-                                    </Flex>
-                                    {bookingsIncome && filteredBookingsIncome.length > 0 ? (
-                                        <>
-                                            <Box overflowX="auto" mb={4}>
-                                                <Table.Root size="sm">
-                                                    <Table.Header bg="gray.50">
-                                                        <Table.Row>
-                                                            <Table.ColumnHeader py={3} px={3} textAlign="right">العميل</Table.ColumnHeader>
-                                                            <Table.ColumnHeader py={3} px={3} textAlign="right">نوع الزيارة</Table.ColumnHeader>
-                                                            <Table.ColumnHeader py={3} px={3} textAlign="right">الإجراء</Table.ColumnHeader>
-                                                            <Table.ColumnHeader py={3} px={3} textAlign="right">المبلغ</Table.ColumnHeader>
-                                                        </Table.Row>
-                                                    </Table.Header>
-                                                    <Table.Body>
-                                                        {filteredBookingsIncome.map((row, i) => (
-                                                            <Table.Row key={i}>
-                                                                <Table.Cell py={3} px={3}>{row.customerName}</Table.Cell>
-                                                                <Table.Cell py={3} px={3} color="gray.600">
-                                                                    {/* @ts-ignore */}
-                                                                    {row.visitType === 'checkup' ? 'كشف' : row.visitType === 'followup' ? 'إعادة' : row.visitType === 'consultation' ? 'استشارة' : (row.visitType || '—')}
-                                                                </Table.Cell>
-                                                                    {/* @ts-ignore */}
-                                                                <Table.Cell py={3} px={3}>{row.procedureType || '—'}</Table.Cell>
-                                                                <Table.Cell py={3} px={3} fontWeight="bold" color="#615b36">{formatAmount(row.amount)} EGP</Table.Cell>
-                                                            </Table.Row>
-                                                        ))}
-                                                    </Table.Body>
-                                                </Table.Root>
-                                            </Box>
-                                            <Flex justify="space-between" align="center" pt={3} borderTop="2px solid" borderColor="gray.100">
-                                                <Text fontWeight="bold" color="gray.700">الإجمالي (للفلتر)</Text>
-                                                <Text fontWeight="bold" fontSize="lg" color="#615b36">
-                                                    {formatAmount(filteredBookingsIncome.reduce((acc, row) => acc + (row.amount || 0), 0))} EGP
-                                                </Text>
+                                    {bookingsIncome &&
+                                    ((bookingsIncome.byDoctor && bookingsIncome.byDoctor.length > 0) ||
+                                        (bookingsIncome.byCustomer && bookingsIncome.byCustomer.length > 0)) ? (
+                                        <Stack gap={8}>
+                                            {bookingsIncome.byDoctor && bookingsIncome.byDoctor.length > 0 && (
+                                                <Box>
+                                                    <Text fontWeight="bold" color="gray.700" mb={3} fontSize="sm">
+                                                        حسب الطبيب
+                                                    </Text>
+                                                    <Box overflowX="auto" mb={3}>
+                                                        <Table.Root size="sm">
+                                                            <Table.Header bg="gray.50">
+                                                                <Table.Row>
+                                                                    <Table.ColumnHeader py={3} px={3} textAlign="right">الطبيب</Table.ColumnHeader>
+                                                                    <Table.ColumnHeader py={3} px={3} textAlign="right">المبلغ</Table.ColumnHeader>
+                                                                </Table.Row>
+                                                            </Table.Header>
+                                                            <Table.Body>
+                                                                {bookingsIncome.byDoctor.map((row, i) => (
+                                                                    <Table.Row key={row.doctorId ?? `bd-${i}`}>
+                                                                        <Table.Cell py={3} px={3}>{doctorRowLabel(row)}</Table.Cell>
+                                                                        <Table.Cell py={3} px={3} fontWeight="bold" color="#615b36">
+                                                                            {formatAmount(row.amount)} EGP
+                                                                        </Table.Cell>
+                                                                    </Table.Row>
+                                                                ))}
+                                                            </Table.Body>
+                                                        </Table.Root>
+                                                    </Box>
+                                                    <Flex justify="space-between" align="center" pt={2} borderTop="1px solid" borderColor="gray.100">
+                                                        <Text fontSize="sm" color="gray.600">مجموع حسب الطبيب</Text>
+                                                        <Text fontWeight="bold" color="#615b36">
+                                                            {formatAmount(
+                                                                bookingsIncome.totalByDoctor ??
+                                                                    bookingsIncome.byDoctor.reduce((a, r) => a + (r.amount || 0), 0),
+                                                            )}{' '}
+                                                            EGP
+                                                        </Text>
+                                                    </Flex>
+                                                </Box>
+                                            )}
+
+                                            {bookingsIncome.byCustomer && bookingsIncome.byCustomer.length > 0 && (
+                                                <Box>
+                                                    <Text fontWeight="bold" color="gray.700" mb={3} fontSize="sm">
+                                                        حسب العميل
+                                                    </Text>
+                                                    <Flex justify="space-between" align="center" mb={4} flexWrap="wrap" gap={3}>
+                                                        <Text fontWeight="bold" color="gray.600" fontSize="sm">الفلترة حسب الإجراء</Text>
+                                                        <Box bg="gray.50" border="1px solid" borderColor="gray.200" borderRadius="lg" px={2} minW="200px">
+                                                            <select
+                                                                value={filterProcedure}
+                                                                onChange={(e) => setFilterProcedure(e.target.value)}
+                                                                style={{ width: '100%', padding: '6px', background: 'transparent', outline: 'none' }}
+                                                            >
+                                                                <option value="all">الكل</option>
+                                                                <option value="none">بدون إجراء</option>
+                                                                {bookingsProceduresList.map(p => (
+                                                                    <option key={p} value={p}>{p}</option>
+                                                                ))}
+                                                            </select>
+                                                        </Box>
+                                                    </Flex>
+                                                    {filteredBookingsIncome.length > 0 ? (
+                                                        <>
+                                                            <Box overflowX="auto" mb={4}>
+                                                                <Table.Root size="sm">
+                                                                    <Table.Header bg="gray.50">
+                                                                        <Table.Row>
+                                                                            <Table.ColumnHeader py={3} px={3} textAlign="right">العميل</Table.ColumnHeader>
+                                                                            <Table.ColumnHeader py={3} px={3} textAlign="right">نوع الزيارة</Table.ColumnHeader>
+                                                                            <Table.ColumnHeader py={3} px={3} textAlign="right">الإجراء</Table.ColumnHeader>
+                                                                            <Table.ColumnHeader py={3} px={3} textAlign="right">المبلغ</Table.ColumnHeader>
+                                                                        </Table.Row>
+                                                                    </Table.Header>
+                                                                    <Table.Body>
+                                                                        {filteredBookingsIncome.map((row, i) => (
+                                                                            <Table.Row key={i}>
+                                                                                <Table.Cell py={3} px={3}>{row.customerName}</Table.Cell>
+                                                                                <Table.Cell py={3} px={3} color="gray.600">
+                                                                                    {/* @ts-ignore */}
+                                                                                    {row.visitType === 'checkup' ? 'كشف' : row.visitType === 'followup' ? 'إعادة' : row.visitType === 'consultation' ? 'استشارة' : (row.visitType || '—')}
+                                                                                </Table.Cell>
+                                                                                {/* @ts-ignore */}
+                                                                                <Table.Cell py={3} px={3}>{row.procedureType || '—'}</Table.Cell>
+                                                                                <Table.Cell py={3} px={3} fontWeight="bold" color="#615b36">{formatAmount(row.amount)} EGP</Table.Cell>
+                                                                            </Table.Row>
+                                                                        ))}
+                                                                    </Table.Body>
+                                                                </Table.Root>
+                                                            </Box>
+                                                            <Flex justify="space-between" align="center" pt={3} borderTop="2px solid" borderColor="gray.100">
+                                                                <Text fontWeight="bold" color="gray.700">الإجمالي (للفلتر)</Text>
+                                                                <Text fontWeight="bold" fontSize="lg" color="#615b36">
+                                                                    {formatAmount(filteredBookingsIncome.reduce((acc, row) => acc + (row.amount || 0), 0))} EGP
+                                                                </Text>
+                                                            </Flex>
+                                                        </>
+                                                    ) : (
+                                                        <Text fontSize="sm" color="gray.500" mb={2}>لا توجد صفوف تطابق الفلتر الحالي.</Text>
+                                                    )}
+                                                </Box>
+                                            )}
+
+                                            <Flex justify="space-between" align="center" pt={1} borderTop="2px solid" borderColor="gray.100">
+                                                <Text fontWeight="bold" color="gray.700">إجمالي دخل الحجوزات</Text>
+                                                <Text fontWeight="bold" fontSize="lg" color="#615b36">{formatAmount(bookingsIncome.total)} EGP</Text>
                                             </Flex>
-                                        </>
+                                        </Stack>
                                     ) : (
                                         <Box py={10} textAlign="center">
                                             <Receipt size={40} color="#e2e8f0" style={{ margin: '0 auto 8px' }} />
@@ -879,9 +999,6 @@ export default function MonthlyAccountsPage() {
                                     bg="linear-gradient(135deg, #615b36 0%, #7a7350 100%)"
                                     px={{ base: 4, md: 6 }}
                                     py={4}
-                                    cursor="pointer"
-                                    onClick={() => setIsTaxonomyExpanded(p => !p)}
-                                    _hover={{ opacity: 0.96 }}
                                 >
                                     <Flex
                                         justify="space-between"
@@ -900,12 +1017,9 @@ export default function MonthlyAccountsPage() {
                                                 <Layers size={22} strokeWidth={2} />
                                             </Box>
                                             <Box minW={0}>
-                                                <Flex align="center" gap={2}>
-                                                    {isTaxonomyExpanded ? <ChevronUp size={20} color="white" /> : <ChevronDown size={20} color="white" />}
-                                                    <Heading size="md" color="white" fontWeight="bold" lineHeight="short">
-                                                        أنواع المصروفات
-                                                    </Heading>
-                                                </Flex>
+                                                <Heading size="md" color="white" fontWeight="bold" lineHeight="short">
+                                                    أنواع المصروفات
+                                                </Heading>
                                                 <Text fontSize="sm" color="whiteAlpha.900" mt={1}>
                                                     التصنيف الرئيسي والفئات الفرعية تُستخدم عند تسجيل أي مصروف.
                                                 </Text>
@@ -918,10 +1032,7 @@ export default function MonthlyAccountsPage() {
                                             color="white"
                                             _hover={{ bg: 'whiteAlpha.200' }}
                                             loading={isExpenseCategoriesLoading}
-                                            onClick={(e) => {
-                                                e.stopPropagation()
-                                                void refreshExpenseTaxonomy()
-                                            }}
+                                            onClick={() => void refreshExpenseTaxonomy()}
                                             flexShrink={0}
                                         >
                                             <HStack gap={2}>
@@ -931,7 +1042,6 @@ export default function MonthlyAccountsPage() {
                                         </Button>
                                     </Flex>
                                 </Box>
-                                {isTaxonomyExpanded && (
                                 <Card.Body p={{ base: 4, md: 6 }}>
                                     <Stack gap={5}>
                                         <Box
@@ -1004,16 +1114,11 @@ export default function MonthlyAccountsPage() {
                                                                 bg="white"
                                                                 borderBottomWidth="1px"
                                                                 borderColor="gray.100"
-                                                                cursor="pointer"
-                                                                _hover={{ bg: "gray.50" }}
-                                                                onClick={() => toggleCategory(cat.id)}
+                                                                flexWrap="wrap"
                                                             >
-                                                                <Flex align="center" gap={3}>
-                                                                    {expandedCategories[cat.id] ? <ChevronUp size={20} color="#615b36" /> : <ChevronDown size={20} color="#615b36" />}
-                                                                    <Text fontWeight="bold" color="#615b36" fontSize="md">
-                                                                        {cat.name}
-                                                                    </Text>
-                                                                </Flex>
+                                                                <Text fontWeight="bold" color="#615b36" fontSize="md">
+                                                                    {cat.name}
+                                                                </Text>
                                                                 <IconButton
                                                                     aria-label="حذف التصنيف"
                                                                     size="sm"
@@ -1022,15 +1127,11 @@ export default function MonthlyAccountsPage() {
                                                                     loading={
                                                                         deletingId?.kind === 'cat' && deletingId.id === cat.id
                                                                     }
-                                                                    onClick={(e) => {
-                                                                        e.stopPropagation()
-                                                                        void handleDeleteCategory(cat.id)
-                                                                    }}
+                                                                    onClick={() => void handleDeleteCategory(cat.id)}
                                                                 >
                                                                     <Trash2 size={16} />
                                                                 </IconButton>
                                                             </Flex>
-                                                            {expandedCategories[cat.id] && (
                                                             <Box px={4} py={3}>
                                                                 {subs.length > 0 ? (
                                                                     <Flex gap={2} flexWrap="wrap" mb={3}>
@@ -1104,7 +1205,6 @@ export default function MonthlyAccountsPage() {
                                                                     </Button>
                                                                 </Flex>
                                                             </Box>
-                                                            )}
                                                         </Box>
                                                     )
                                                 })}
@@ -1112,7 +1212,6 @@ export default function MonthlyAccountsPage() {
                                         )}
                                     </Stack>
                                 </Card.Body>
-                                )}
                             </Card.Root>
 
                             {/* المصروفات */}
@@ -1123,31 +1222,32 @@ export default function MonthlyAccountsPage() {
                                             <FileText size={20} />
                                             المصروفات
                                         </Heading>
-                                        <Flex gap={2} align="center" flexWrap="wrap">
-                                            <Box bg="gray.50" border="1px solid" borderColor="gray.200" borderRadius="lg" px={2}>
-                                                <select
-                                                    value={filterExpenseCat}
-                                                    onChange={(e) => setFilterExpenseCat(e.target.value)}
-                                                    style={{ minWidth: '130px', padding: '6px', outline: 'none', background: 'transparent' }}
-                                                >
-                                                    <option value="all">التصنيف: الكل</option>
-                                                    {expenseCategoriesList.map(c => (
-                                                        <option key={c} value={c}>{c}</option>
-                                                    ))}
-                                                </select>
-                                            </Box>
-                                            <Button size="sm" bg="red.600" color="white" _hover={{ bg: 'red.700' }} onClick={onExpenseOpen}>
-                                                <HStack gap={1} as="span">
-                                                    <Plus size={16} />
-                                                    <span>إضافة مصروف</span>
-                                                </HStack>
-                                            </Button>
-                                        </Flex>
+                                        <Button size="sm" bg="red.600" color="white" _hover={{ bg: 'red.700' }} onClick={onExpenseOpen}>
+                                            <HStack gap={1} as="span">
+                                                <Plus size={16} />
+                                                <span>إضافة مصروف</span>
+                                            </HStack>
+                                        </Button>
                                     </Flex>
                                 </Card.Header>
                                 <Card.Body p={5}>
-                                    {expenses && filteredExpenses.length > 0 ? (
+                                    {expenses && expenses.expenses?.length > 0 ? (
                                         <>
+                                            <Flex justify="space-between" align="center" mb={4} flexWrap="wrap" gap={3}>
+                                                <Text fontWeight="bold" color="gray.600" fontSize="sm">الفلترة حسب التصنيف</Text>
+                                                <Box bg="gray.50" border="1px solid" borderColor="gray.200" borderRadius="lg" px={2} minW="200px">
+                                                    <select
+                                                        value={filterExpenseCat}
+                                                        onChange={(e) => setFilterExpenseCat(e.target.value)}
+                                                        style={{ width: '100%', padding: '6px', background: 'transparent', outline: 'none' }}
+                                                    >
+                                                        <option value="all">الكل</option>
+                                                        {expenseCategoriesList.map((c) => (
+                                                            <option key={c} value={c}>{c}</option>
+                                                        ))}
+                                                    </select>
+                                                </Box>
+                                            </Flex>
                                             <Box overflowX="auto" mb={4}>
                                                 <Table.Root size="sm">
                                                     <Table.Header bg="gray.50">
@@ -1181,9 +1281,14 @@ export default function MonthlyAccountsPage() {
                                                 </Table.Root>
                                             </Box>
                                             <Flex justify="space-between" align="center" pt={3} borderTop="2px solid" borderColor="gray.100">
-                                                <Text fontWeight="bold" color="gray.700">الإجمالي (للفلتر)</Text>
+                                                <Text fontWeight="bold" color="gray.700">الإجمالي</Text>
                                                 <Text fontWeight="bold" fontSize="lg" color="red.600">
-                                                    {formatAmount(filteredExpenses.reduce((acc, row) => acc + (typeof row.amount === 'string' ? parseFloat(row.amount) : row.amount || 0), 0))} EGP
+                                                    {formatAmount(
+                                                        filterExpenseCat === 'all'
+                                                            ? Number(expenses.total ?? 0)
+                                                            : filteredExpenses.reduce((acc, e) => acc + Number(e.amount ?? 0), 0),
+                                                    )}{' '}
+                                                    EGP
                                                 </Text>
                                             </Flex>
                                         </>
@@ -1363,7 +1468,7 @@ export default function MonthlyAccountsPage() {
                                                             setExpenseForm((p) => ({
                                                                 ...p,
                                                                 category_id: 0,
-                                                                subcategory_id: null,
+                                                                subcategory_id: 0,
                                                             }))
                                                             setExpenseSubcategories([])
                                                             return
@@ -1420,7 +1525,7 @@ export default function MonthlyAccountsPage() {
                                                 </Text>
                                             )}
                                         </Field.Root>
-                                        <Field.Root>
+                                        <Field.Root required>
                                             <Field.Label>
                                                 <Flex align="center" gap={2} flexWrap="wrap">
                                                     <Text fontWeight="semibold">الفئة الفرعية</Text>
@@ -1447,7 +1552,7 @@ export default function MonthlyAccountsPage() {
                                                             ...p,
                                                             subcategory_id: Number(
                                                                 (e.target as HTMLSelectElement).value,
-                                                            ) || null,
+                                                            ),
                                                         }))
                                                     }
                                                     disabled={
@@ -1540,7 +1645,8 @@ export default function MonthlyAccountsPage() {
                                 disabled={
                                     !expenseForm.description?.trim() ||
                                     expenseForm.amount <= 0 ||
-                                    !expenseForm.category_id
+                                    !expenseForm.category_id ||
+                                    !expenseForm.subcategory_id
                                 }
                             >
                                 حفظ المصروف
@@ -1552,3 +1658,4 @@ export default function MonthlyAccountsPage() {
         </Box>
     )
 }
+

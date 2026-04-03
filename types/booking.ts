@@ -7,6 +7,7 @@ export interface Booking {
     id: number;
     customerName: string;
     customerPhone: string;
+    doctorId?: number | null;
     /** null للحجوزات الأونلاين المعلقة */
     appointmentDate: string | null;
     bookingType: BookingType;
@@ -37,6 +38,7 @@ export interface CreateClinicBookingData {
     date: string;        // YYYY-MM-DD (الـ API بيتوقع date مش dateTime)
     /** اختياري: وقت الحجز (HH:mm) — يُرسل في حقل time حسب توثيق الـ API */
     time?: string;
+    doctorId?: number;
     amountPaid?: number;
     /** نوع الحجز: من قائمة الخدمات (BOOKING_SERVICES) أو القيم القديمة checkup/followup/consultation */
     visitType?: VisitType | string;
@@ -48,6 +50,7 @@ export interface UpdateBookingData {
     phone?: string;
     date?: string;        // YYYY-MM-DD
     time?: string;
+    doctorId?: number;
     amountPaid?: number;
     visitType?: VisitType | string;
 }
@@ -56,6 +59,7 @@ export interface UpdateBookingData {
 export interface CreateOnlineBookingData {
     name: string;
     phone: string;
+    doctorId?: number;
     preferredDate?: string;   // YYYY-MM-DD
     preferredTime?: string;   // HH:MM
     visitType?: VisitType;
@@ -152,6 +156,7 @@ export interface WorkingDay {
     date: string;        // YYYY-MM-DD
     startTime: string;   // e.g. "10:00"
     endTime: string;     // e.g. "18:00"
+    doctorId?: number;
     isActive: boolean;
     createdBy?: number;
     createdAt?: string;
@@ -184,6 +189,7 @@ export interface AvailableSlotsResponse {
     /** عند عدم التوفر: available: false و message */
     available?: boolean;
     message?: string;
+    doctorId?: number;
     /** توافق قديم: قائمة بكل السلات مع count/available */
     slots?: SlotInfo[];
 }
@@ -205,6 +211,7 @@ export interface CreateSlotBookingData {
     patientId: number;
     date: string;
     timeSlot: string;
+    doctorId?: number;
     bookingType?: 'online' | 'clinic';
 }
 

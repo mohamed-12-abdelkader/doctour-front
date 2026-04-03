@@ -191,6 +191,7 @@ export default function ContactSection() {
           <Box textAlign="center" position="relative" zIndex={1}>
             <Button
               as="a"
+              // @ts-ignore
               href={doctorInfo.whatsappUrl}
               target="_blank"
               rel="noopener noreferrer"

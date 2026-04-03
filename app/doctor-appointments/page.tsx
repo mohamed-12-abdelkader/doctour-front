@@ -298,6 +298,7 @@ export default function DoctorAppointments() {
                     <Flex gap={3} align="center" flexWrap="wrap" w={{ base: 'full', md: 'auto' }} justify={{ base: 'space-between', md: 'flex-end' }}>
                         <Button
                             variant="ghost" colorPalette="gray" size="sm"
+                            // @ts-ignore
                             onClick={fetchBookings} loading={isLoading}
                             flexShrink={0}
                         >

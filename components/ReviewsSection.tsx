@@ -50,6 +50,7 @@ export default function ReviewsSection() {
             >
               <Box
                 as="img"
+                // @ts-ignore
                 src={src}
                 alt={`ريفيو ${i + 1}`}
                 w="100%"
@@ -74,6 +75,7 @@ export default function ReviewsSection() {
             >
               <Box
                 as="img"
+                // @ts-ignore
                 src={src}
                 alt={`ريفيو ${i + 1}`}
                 w="100%"

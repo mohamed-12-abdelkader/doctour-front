@@ -150,6 +150,7 @@ export default function HeroSection() {
                     </Box>
                     <Box
                       as="a"
+                      // @ts-ignore
                       href={doctorInfo.whatsappUrl}
                       target="_blank"
                       rel="noopener noreferrer"

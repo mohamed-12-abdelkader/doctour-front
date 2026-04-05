@@ -10,6 +10,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import api from '@/lib/axios'
 import { toaster } from '@/components/ui/toaster'
 import { canChooseDoctor, getCurrentDoctorId, getCurrentRole, setSelectedDoctorId } from '@/lib/doctor-context'
+import { WhatsAppCustomerLink } from '@/components/WhatsAppCustomerLink'
 
 const MotionRow = motion(Table.Row)
 
@@ -851,6 +852,7 @@ export default function OnlineBookingsPage() {
                                                         <Text fontSize="sm" fontWeight="medium" color="gray.700" fontFamily="monospace" dir="ltr">
                                                             {booking.customerPhone || row.phoneNumber || '—'}
                                                         </Text>
+                                                        <WhatsAppCustomerLink phone={booking.customerPhone || row.phoneNumber} boxSize="28px" iconSize={16} />
                                                     </Flex>
                                                     {row.email && (
                                                         <Flex align="center" gap={2} justify="flex-end" minW={0}>
@@ -940,11 +942,12 @@ export default function OnlineBookingsPage() {
                                                         </Table.Cell>
                                                         <Table.Cell py={3} px={4}>
                                                             <VStack align="stretch" gap={1}>
-                                                                <Flex align="center" gap={2} justify="flex-end">
+                                                                <Flex align="center" gap={2} justify="flex-end" flexWrap="wrap">
                                                                     <Phone size={14} color="#94a3b8" />
                                                                     <Text fontSize="sm" fontWeight="medium" color="gray.700" fontFamily="monospace" dir="ltr">
                                                                         {booking.customerPhone || row.phoneNumber || '—'}
                                                                     </Text>
+                                                                    <WhatsAppCustomerLink phone={booking.customerPhone || row.phoneNumber} boxSize="28px" iconSize={16} />
                                                                 </Flex>
                                                                 {row.email && (
                                                                     <Flex align="center" gap={2} justify="flex-end">

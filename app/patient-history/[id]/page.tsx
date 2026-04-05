@@ -7,7 +7,7 @@ import {
 import { useState, useEffect, useRef } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import {
-    ArrowRight, Calendar, Phone, DollarSign, Clock, FileText,
+    Calendar, Phone, DollarSign, Clock, FileText,
     Plus, Trash2, Activity, ImagePlus, X, ExternalLink, Edit2, AlertTriangle, Camera, Upload,
 } from 'lucide-react'
 import {
@@ -16,7 +16,7 @@ import {
 } from '@/types/booking'
 import api from '@/lib/axios'
 import { toaster } from '@/components/ui/toaster'
-import { isSuperAdminUser } from '@/lib/admin-nav'
+import { canAddPatientVisitReport } from '@/lib/admin-nav'
 
 function getIsAdmin(): boolean {
     if (typeof document === 'undefined') return false
@@ -38,7 +38,7 @@ export default function PatientHistoryPage() {
     const [data, setData] = useState<BookingHistoryResponse | null>(null)
     const [isLoading, setIsLoading] = useState(true)
     const [isAdmin, setIsAdmin] = useState(false)
-    /** زر «تقرير جديد»: يظهر فقط لـ role=admin و permissions=[] (سوبر أدمن) */
+    /** زر «تقرير جديد»: يظهر لـ role=admin أو role=doctor */
     const [canCreateNewReport, setCanCreateNewReport] = useState(false)
 
     // ── Report modal ──────────────────────────────────────────────────────────
@@ -66,7 +66,7 @@ export default function PatientHistoryPage() {
     useEffect(() => { if (id) fetchPatientHistory() }, [id])
     useEffect(() => {
         setIsAdmin(getIsAdmin())
-        setCanCreateNewReport(isSuperAdminUser())
+        setCanCreateNewReport(canAddPatientVisitReport())
     }, [])
 
     const fetchPatientHistory = async () => {
@@ -375,12 +375,6 @@ export default function PatientHistoryPage() {
             {/* Profile Header */}
             <Box bg="linear-gradient(135deg, #615b36 0%, #7a7350 50%, #8a8260 100%)" pt={8} pb={24} px={4}>
                 <Container maxW="4xl">
-                    <Button
-                        variant="ghost" color="white" _hover={{ bg: 'whiteAlpha.200' }}
-                        onClick={() => router.push('/today-bookings')} size="sm" mb={6} gap={2}
-                    >
-                        <ArrowRight size={18} /> رجوع
-                    </Button>
                     <Flex align="center" gap={6} flexWrap="wrap">
                         <Avatar.Root size="2xl" border="4px solid" borderColor="whiteAlpha.400" boxShadow="lg" bg="whiteAlpha.300">
                             <Avatar.Fallback fontSize="3xl" color="white" fontWeight="bold">

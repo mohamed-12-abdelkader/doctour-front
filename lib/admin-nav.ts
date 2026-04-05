@@ -159,6 +159,24 @@ export function isSuperAdminUser(): boolean {
   }
 }
 
+/** إضافة تقرير من صفحة تاريخ المريض: `admin` أو `doctor` (حسب الـ API). */
+export function canAddPatientVisitReport(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const raw = localStorage.getItem("user");
+    if (!raw) return false;
+    const data = JSON.parse(raw) as Record<string, unknown>;
+    const role = String(
+      data.role ?? (data.user as Record<string, unknown>)?.role ?? "",
+    ).toLowerCase();
+    if (role === "admin") return true;
+    if (role === "doctor") return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 export function canSeeLink(
   linkPermission: string | string[] | null,
   userPermissions: string[],

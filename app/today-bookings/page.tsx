@@ -45,8 +45,10 @@ import {
   CalendarDays,
   ChevronRight,
   ChevronLeft,
+  Phone,
 } from "lucide-react";
 import api from "@/lib/axios";
+import { WhatsAppCustomerLink } from "@/components/WhatsAppCustomerLink";
 import {
   canChooseDoctor,
   getCurrentDoctorId,
@@ -969,7 +971,6 @@ export default function TodayBookings() {
                   {filteredBookings.map((booking, index) => (
                     <Box
                       key={booking.id}
-                      as="button"
                       w="full"
                       textAlign="right"
                       p={4}
@@ -992,6 +993,7 @@ export default function TodayBookings() {
                       shadow="sm"
                       _hover={{ shadow: "md", borderColor: "#666139" }}
                       transition="all 0.2s"
+                      cursor="pointer"
                       onClick={() =>
                         router.push(`/patient-history/${booking.id}`)
                       }
@@ -1048,9 +1050,52 @@ export default function TodayBookings() {
                             >
                               {booking.customerName}
                             </Text>
-                            <Text fontSize="sm" color="gray.500">
-                              {booking.customerPhone}
-                            </Text>
+                            <Flex
+                              align="center"
+                              gap={2.5}
+                              mt={1}
+                              w="100%"
+                              maxW="100%"
+                              bg="#f4f3ed"
+                              borderRadius="xl"
+                              borderWidth="1px"
+                              borderColor="rgba(102, 97, 57, 0.18)"
+                              px={3}
+                              py={2}
+                              boxShadow="sm"
+                            >
+                              <Box
+                                as="span"
+                                display="flex"
+                                alignItems="center"
+                                justifyContent="center"
+                                color="#666139"
+                                opacity={0.85}
+                                flexShrink={0}
+                              >
+                                <Phone size={18} strokeWidth={2} />
+                              </Box>
+                              <Text
+                                fontSize="sm"
+                                color="gray.700"
+                                fontWeight="medium"
+                                fontFamily="monospace"
+                                dir="ltr"
+                                flex="1"
+                                minW={0}
+                              >
+                                {booking.customerPhone}
+                              </Text>
+                              <Box flexShrink={0} lineHeight={0}>
+                                <WhatsAppCustomerLink
+                                  phone={booking.customerPhone}
+                                  stopClickPropagation
+                                  boxSize="40px"
+                                  iconSize={21}
+                                  pill
+                                />
+                              </Box>
+                            </Flex>
                             <Flex align="center" gap={2} mt={1}>
                               <Text
                                 fontSize="sm"
@@ -1329,6 +1374,7 @@ export default function TodayBookings() {
                           const target = e.target as HTMLElement;
                           if (
                             !target.closest("button") &&
+                            !target.closest("a") &&
                             !target.closest("[data-actions]")
                           ) {
                             router.push(`/patient-history/${booking.id}`);
@@ -1361,7 +1407,41 @@ export default function TodayBookings() {
                           fontSize="sm"
                           color="gray.600"
                         >
-                          {booking.customerPhone}
+                          <Flex
+                            align="center"
+                            gap={2}
+                            flexWrap="nowrap"
+                            bg="gray.50"
+                            borderRadius="lg"
+                            borderWidth="1px"
+                            borderColor="gray.200"
+                            px={2.5}
+                            py={1.5}
+                            w="fit-content"
+                            maxW="100%"
+                          >
+                            <Box color="#666139" opacity={0.9} flexShrink={0}>
+                              <Phone size={15} strokeWidth={2} />
+                            </Box>
+                            <Text
+                              fontFamily="monospace"
+                              dir="ltr"
+                              fontSize="sm"
+                              color="gray.700"
+                              fontWeight="medium"
+                            >
+                              {booking.customerPhone}
+                            </Text>
+                            <Box flexShrink={0} lineHeight={0}>
+                              <WhatsAppCustomerLink
+                                phone={booking.customerPhone}
+                                stopClickPropagation
+                                boxSize="34px"
+                                iconSize={19}
+                                pill
+                              />
+                            </Box>
+                          </Flex>
                         </Table.Cell>
                         <Table.Cell py={4} px={4}>
                           <Badge

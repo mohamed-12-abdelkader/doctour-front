@@ -30,7 +30,20 @@ import {
   ExaminationStatus,
   CreateClinicBookingData,
   UpdateBookingData,
+  CLINIC_PAYMENT_OPTIONS,
 } from "@/types/booking";
+import {
+  collectProcedureOptions,
+  formatBookingAmount,
+  formatBookingTime,
+  getPaymentInfo,
+  getProcedureTypes,
+  getVisitTypeLabel,
+  hasBookingSpecificTime,
+  matchesPaymentFilter,
+  paymentBadgeColors,
+  type PaymentFilterValue,
+} from "@/lib/booking-display";
 import BookingModal from "@/components/BookingModal";
 import {
   Search,
@@ -45,11 +58,18 @@ import {
   CalendarDays,
   ChevronRight,
   ChevronLeft,
-  Phone,
+  CreditCard,
+  ChevronDown,
+  CheckCircle,
+  Clock,
+  CalendarClock,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import api from "@/lib/axios";
 import { WhatsAppCustomerLink } from "@/components/WhatsAppCustomerLink";
 import {
+  canChangeExaminationStatus,
   canChooseDoctor,
   getCurrentDoctorId,
   getCurrentRole,
@@ -65,6 +85,8 @@ export default function TodayBookings() {
     "all"
   );
   const [filterProcedure, setFilterProcedure] = useState<string>("all");
+  const [filterPaymentMethod, setFilterPaymentMethod] =
+    useState<PaymentFilterValue>("all");
   const todayStr = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
   const [rangeStart, setRangeStart] = useState<string>(todayStr);
   const [rangeEnd, setRangeEnd] = useState<string>(todayStr);
@@ -76,15 +98,22 @@ export default function TodayBookings() {
   const [hoverDate, setHoverDate] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [modalDefaultNoTime, setModalDefaultNoTime] = useState(false);
   const [editingBooking, setEditingBooking] = useState<Booking | null>(null);
   const [doctors, setDoctors] = useState<Array<{ id: number; name?: string; user?: { name?: string } }>>([]);
   const [selectedDoctorId, setDoctorId] = useState<number>(0);
   const [canSelectDoctor, setCanSelectDoctor] = useState(false);
+  const [canManageExamination, setCanManageExamination] = useState(false);
+  const [showTotalIncome, setShowTotalIncome] = useState(false);
+  const [changingExaminationId, setChangingExaminationId] = useState<number | null>(
+    null,
+  );
 
   useEffect(() => {
     const role = getCurrentRole();
     const canSelect = canChooseDoctor(role);
     setCanSelectDoctor(canSelect);
+    setCanManageExamination(canChangeExaminationStatus(role));
     const current = getCurrentDoctorId();
     if (current) setDoctorId(current);
   }, []);
@@ -215,29 +244,25 @@ export default function TodayBookings() {
 
 
   const filteredBookings = useMemo(() => {
-    const byProcedure =
-      filterProcedure === "all"
-        ? bookings
-        : bookings.filter((booking) => booking.procedureType === filterProcedure);
+    let list = bookings.filter((b) => matchesPaymentFilter(b, filterPaymentMethod));
 
-    if (!searchQuery) return byProcedure;
+    if (filterProcedure !== "all") {
+      list = list.filter((b) => getProcedureTypes(b).includes(filterProcedure));
+    }
+
+    if (!searchQuery) return list;
     const searchLower = searchQuery.toLowerCase();
-    return byProcedure.filter(
+    return list.filter(
       (booking) =>
         booking.customerName.toLowerCase().includes(searchLower) ||
-        booking.customerPhone.includes(searchQuery)
+        booking.customerPhone.includes(searchQuery),
     );
-  }, [bookings, searchQuery, filterProcedure]);
+  }, [bookings, searchQuery, filterProcedure, filterPaymentMethod]);
 
-  const procedureOptions = useMemo(() => {
-    return Array.from(
-      new Set(
-        bookings
-          .map((booking) => booking.procedureType?.trim())
-          .filter((v): v is string => Boolean(v))
-      )
-    ).sort((a, b) => a.localeCompare(b, "ar"));
-  }, [bookings]);
+  const procedureOptions = useMemo(
+    () => collectProcedureOptions(bookings),
+    [bookings],
+  );
 
   const totalIncome = useMemo(() => {
     return filteredBookings.reduce((sum, b) => {
@@ -249,24 +274,75 @@ export default function TodayBookings() {
     }, 0);
   }, [filteredBookings]);
 
-  const handleCreateBooking = async (data: CreateClinicBookingData) => {
-    try {
-      await api.post("/bookings/clinic", data);
-      toaster.create({
-        title: "تم إنشاء الحجز بنجاح",
-        type: "success",
-        duration: 2000,
-      });
-      fetchBookings();
-      setIsModalOpen(false);
-    } catch (error: any) {
-      toaster.create({
-        title: "خطأ في إنشاء الحجز",
-        description: error.response?.data?.message || "حدث خطأ",
-        type: "error",
-        duration: 3000,
-      });
+  function buildClinicPayload(
+    data: CreateClinicBookingData,
+    allowExtraBooking = false,
+  ): Record<string, unknown> {
+    const procedureTypes = data.procedureTypes ?? data.visitTypes ?? [];
+    const payload: Record<string, unknown> = {
+      name: data.name,
+      phone: data.phone,
+      date: data.date,
+      doctorId: data.doctorId,
+      paymentMethod: data.paymentMethod,
+      amountPaid: data.amountPaid,
+      procedureTypes,
+    };
+    if (data.noTime) {
+      payload.noTime = true;
+    } else if (data.time) {
+      payload.time = data.time;
     }
+    if (allowExtraBooking || data.allowExtraBooking) {
+      payload.allowExtraBooking = true;
+    }
+    return payload;
+  }
+
+  const handleCreateBooking = async (data: CreateClinicBookingData) => {
+    const tryCreate = async (allowExtra: boolean): Promise<void> => {
+      try {
+        await api.post(
+          "/bookings/clinic",
+          buildClinicPayload(data, allowExtra),
+        );
+        toaster.create({
+          title: allowExtra ? "تم إضافة حجز إضافي" : "تم إنشاء الحجز بنجاح",
+          type: "success",
+          duration: 2000,
+        });
+        fetchBookings();
+        setIsModalOpen(false);
+        setModalDefaultNoTime(false);
+      } catch (error: any) {
+        if (error.response?.status === 409 && !allowExtra) {
+          const msg =
+            error.response?.data?.message || "امتلأت سعة اليوم لهذا الطبيب.";
+          const confirmed = confirm(
+            `${msg}\n\nهل تريد إضافة حجز إضافي؟`,
+          );
+          if (confirmed) {
+            await tryCreate(true);
+            return;
+          }
+          toaster.create({
+            title: "لم يتم الحجز",
+            description: msg,
+            type: "warning",
+            duration: 4000,
+          });
+          throw error;
+        }
+        toaster.create({
+          title: "خطأ في إنشاء الحجز",
+          description: error.response?.data?.message || "حدث خطأ",
+          type: "error",
+          duration: 3000,
+        });
+        throw error;
+      }
+    };
+    await tryCreate(false);
   };
 
   const handleUpdateBooking = async (id: number, data: UpdateBookingData) => {
@@ -286,6 +362,7 @@ export default function TodayBookings() {
         type: "error",
         duration: 3000,
       });
+      throw error;
     }
   };
 
@@ -330,6 +407,13 @@ export default function TodayBookings() {
 
   const handleAddClick = () => {
     setEditingBooking(null);
+    setModalDefaultNoTime(false);
+    setIsModalOpen(true);
+  };
+
+  const handleAddNoTimeClick = () => {
+    setEditingBooking(null);
+    setModalDefaultNoTime(true);
     setIsModalOpen(true);
   };
 
@@ -338,23 +422,35 @@ export default function TodayBookings() {
     setIsModalOpen(true);
   };
 
-  const handleSaveBooking = (data: any) => {
-    // BookingModal بيبعت: { name, phone, date, time, amountPaid, visitType }
-    // نحط fallback للـ field names القديمة
-    const normalized = {
+  const handleSaveBooking = async (data: any) => {
+    const procedureTypes = Array.isArray(data.procedureTypes)
+      ? data.procedureTypes
+      : Array.isArray(data.visitTypes)
+        ? data.visitTypes
+        : undefined;
+    const noTime = data.noTime === true;
+    const normalized: CreateClinicBookingData = {
       name: data.name ?? data.customerName,
       phone: data.phone ?? data.customerPhone,
-      date: data.date ?? data.appointmentDate,   // YYYY-MM-DD
-      time: data.time ?? data.timeSlot,
+      date: data.date ?? data.appointmentDate,
       doctorId: Number(data.doctorId ?? selectedDoctorId) || undefined,
-      amountPaid: typeof data.amountPaid === "string"
-        ? parseFloat(data.amountPaid) : data.amountPaid,
-      visitType: data.visitType,
+      amountPaid:
+        typeof data.amountPaid === "string"
+          ? parseInt(data.amountPaid, 10)
+          : data.amountPaid,
+      paymentMethod: data.paymentMethod,
+      procedureTypes,
+      visitTypes: procedureTypes,
+      noTime,
+      ...(noTime ? {} : { time: data.time ?? data.timeSlot }),
+      ...(editingBooking && data.visitType != null
+        ? { visitType: data.visitType }
+        : {}),
     };
     if (editingBooking) {
-      handleUpdateBooking(editingBooking.id, normalized);
+      await handleUpdateBooking(editingBooking.id, normalized);
     } else {
-      handleCreateBooking(normalized as any);
+      await handleCreateBooking(normalized);
     }
   };
 
@@ -449,40 +545,396 @@ export default function TodayBookings() {
     return undefined;
   };
 
-  const formatTime = (booking: Booking) => {
-    const raw24 = (booking as any).appointmentTime24 as string | undefined;
-    if (raw24) {
-      const [h = "0", m = "0"] = raw24.split(":");
-      const hour = Number(h);
-      const minute = Number(m);
-      if (!Number.isNaN(hour) && !Number.isNaN(minute)) {
-        const period = hour >= 12 ? "م" : "ص";
-        const hour12 = hour % 12 || 12;
-        return `${hour12}:${String(minute).padStart(2, "0")} ${period}`;
+  const handleExaminationStatusChange = async (
+    id: number,
+    examinationStatus: ExaminationStatus,
+  ) => {
+    setChangingExaminationId(id);
+    try {
+      const res = await api.patch(`/bookings/${id}/examination-status`, {
+        examinationStatus,
+      });
+      const updated = res.data?.booking as Booking | undefined;
+      if (updated?.id) {
+        setBookings((prev) =>
+          prev.map((b) => (b.id === updated.id ? { ...b, ...updated } : b)),
+        );
       }
+      toaster.create({
+        title: res.data?.message || "تم تحديث حالة الكشف",
+        type: "success",
+        duration: 2000,
+      });
+      void fetchBookings(true);
+    } catch (error: any) {
+      toaster.create({
+        title: "خطأ في تحديث حالة الكشف",
+        description:
+          error.response?.data?.message || "غير مصرح أو حدث خطأ",
+        type: "error",
+        duration: 3000,
+      });
+    } finally {
+      setChangingExaminationId(null);
     }
-
-    const raw12 = (booking as any).appointmentTime as string | undefined;
-    if (raw12) return raw12;
-
-    if (!booking.appointmentDate) return "-";
-    const [_, timePart = ""] = booking.appointmentDate.split("T");
-    if (!timePart) return "-";
-    const [h = "0", m = "0"] = timePart.split(":");
-    const hour = Number(h);
-    const minute = Number(m);
-    if (Number.isNaN(hour) || Number.isNaN(minute)) return "-";
-    const period = hour >= 12 ? "م" : "ص";
-    const hour12 = hour % 12 || 12;
-    return `${hour12}:${String(minute).padStart(2, "0")} ${period}`;
   };
 
-  const formatAmount = (amount: string | number) => {
-    const num = typeof amount === "string" ? parseFloat(amount) : amount;
-    return num.toFixed(2);
-  };
+  const renderExaminationCell = (booking: Booking) => (
+    <Flex
+      align="center"
+      gap={2}
+      flexWrap="wrap"
+      justify="flex-start"
+      onClick={(e) => e.stopPropagation()}
+    >
+      {changingExaminationId === booking.id && (
+        <Flex align="center" gap={1} color="gray.500">
+          <Spinner size="xs" />
+          <Text fontSize="xs">جارِ التغيير...</Text>
+        </Flex>
+      )}
+      {getExaminationStatusBadge(booking.examinationStatus)}
+      {canManageExamination && (
+        <MenuRoot>
+          <MenuTrigger asChild>
+            <IconButton
+              aria-label="تغيير حالة الكشف"
+              size="xs"
+              variant="ghost"
+              colorPalette="gray"
+            >
+              <ChevronDown size={14} />
+            </IconButton>
+          </MenuTrigger>
+          <MenuContent>
+            <MenuItem
+              value="waiting"
+              onClick={() =>
+                handleExaminationStatusChange(booking.id, "waiting")
+              }
+              disabled={changingExaminationId === booking.id}
+            >
+              <Clock size={14} /> في الانتظار
+            </MenuItem>
+            <MenuItem
+              value="done"
+              color="green.500"
+              onClick={() => handleExaminationStatusChange(booking.id, "done")}
+              disabled={changingExaminationId === booking.id}
+            >
+              <CheckCircle size={14} /> تم الكشف
+            </MenuItem>
+          </MenuContent>
+        </MenuRoot>
+      )}
+    </Flex>
+  );
 
   const handlePrint = () => window.print();
+
+  const renderProcedureTags = (booking: Booking, compact = false) => {
+    const types = getProcedureTypes(booking);
+    if (types.length === 0) {
+      return (
+        <Text fontSize="sm" color="gray.400">
+          —
+        </Text>
+      );
+    }
+    return (
+      <Flex wrap="wrap" gap={1.5}>
+        {types.map((t) => (
+          <Badge
+            key={`${booking.id}-${t}`}
+            variant="subtle"
+            bg="#f4f3ed"
+            color="#615b36"
+            border="1px solid"
+            borderColor="#e8e4d4"
+            fontSize="xs"
+            px={2}
+            py={0.5}
+            rounded="md"
+            fontWeight="medium"
+          >
+            {t}
+          </Badge>
+        ))}
+      </Flex>
+    );
+  };
+
+  const renderPaymentBadge = (booking: Booking) => {
+    const { method, label } = getPaymentInfo(booking);
+    const colors = paymentBadgeColors(method);
+    return (
+      <Badge
+        display="inline-flex"
+        alignItems="center"
+        gap={1}
+        bg={colors.bg}
+        color={colors.color}
+        border="1px solid"
+        borderColor={colors.border}
+        fontSize="xs"
+        px={2}
+        py={1}
+        rounded="lg"
+        fontWeight="semibold"
+      >
+        <CreditCard size={12} />
+        {label}
+      </Badge>
+    );
+  };
+
+  const renderExtraBookingBadge = (booking: Booking) =>
+    booking.isExtraBooking ? (
+      <Badge
+        colorPalette="orange"
+        variant="subtle"
+        fontSize="xs"
+        px={2}
+        py={0.5}
+        rounded="full"
+        fontWeight="bold"
+      >
+        حجز إضافي
+      </Badge>
+    ) : null;
+
+  const renderBookingTimeDisplay = (booking: Booking, compact = false) => {
+    const hasTime = hasBookingSpecificTime(booking);
+    const label = formatBookingTime(booking);
+    return (
+      <Flex direction="column" align="flex-start" gap={1}>
+        <Flex
+          align="center"
+          gap={1.5}
+          bg={compact ? "white" : undefined}
+          px={compact ? 3 : 0}
+          py={compact ? 1 : 0}
+          borderRadius={compact ? "full" : undefined}
+          border={compact ? "1px solid" : undefined}
+          borderColor={compact ? "gray.200" : undefined}
+          flexShrink={0}
+        >
+          {hasTime && <Clock size={14} color="#666139" />}
+          <Text
+            fontSize="sm"
+            fontWeight={hasTime ? "bold" : "medium"}
+            color={hasTime ? "#666139" : "gray.500"}
+            fontStyle={hasTime ? "normal" : "italic"}
+          >
+            {label}
+          </Text>
+        </Flex>
+        {renderExtraBookingBadge(booking)}
+      </Flex>
+    );
+  };
+
+  const getExamCardTheme = (examinationStatus?: ExaminationStatus) => {
+    if (examinationStatus === "done")
+      return { border: "green.200", bg: "#f4f3ed", accent: "#666139" };
+    if (examinationStatus === "waiting")
+      return { border: "yellow.200", bg: "#fffbeb", accent: "#d97706" };
+    return { border: "gray.200", bg: "white", accent: "#666139" };
+  };
+
+  const renderMobileBookingMenu = (booking: Booking) => (
+    <MenuRoot>
+      <MenuTrigger asChild>
+        <IconButton
+          aria-label="المزيد"
+          size="sm"
+          variant="ghost"
+          colorPalette="gray"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <MoreVertical size={18} />
+        </IconButton>
+      </MenuTrigger>
+      <MenuContent>
+        <MenuItem value="edit" onClick={() => handleEditClick(booking)}>
+          تعديل البيانات
+        </MenuItem>
+        {booking.bookingType === "online" && (
+          <>
+            <MenuItem
+              value="pending"
+              onClick={() => handleStatusChange(booking.id, "pending")}
+            >
+              قيد الانتظار
+            </MenuItem>
+            <MenuItem
+              value="confirmed"
+              onClick={() => handleStatusChange(booking.id, "confirmed")}
+            >
+              تأكيد
+            </MenuItem>
+            <MenuItem
+              value="rejected"
+              onClick={() => handleStatusChange(booking.id, "rejected")}
+            >
+              رفض
+            </MenuItem>
+          </>
+        )}
+        <MenuItem
+          value="cancelled"
+          onClick={() => handleDeleteClick(booking.id)}
+          color="red.500"
+        >
+          إلغاء الحجز
+        </MenuItem>
+      </MenuContent>
+    </MenuRoot>
+  );
+
+  const renderMobileBookingCard = (booking: Booking, index: number) => {
+    const theme = getExamCardTheme(booking.examinationStatus);
+    const accent = booking.isExtraBooking ? "#ea580c" : theme.accent;
+    return (
+      <Box
+        key={booking.id}
+        borderRadius="xl"
+        border="1px solid"
+        borderColor={booking.isExtraBooking ? "orange.200" : theme.border}
+        borderInlineStartWidth="4px"
+        borderInlineStartColor={accent}
+        bg={booking.isExtraBooking ? "orange.50" : theme.bg}
+        shadow="sm"
+        overflow="hidden"
+        cursor="pointer"
+        transition="all 0.2s"
+        _hover={{ shadow: "md", borderColor: "#666139" }}
+        onClick={() => router.push(`/patient-history/${booking.id}`)}
+      >
+        {/* الصف العلوي: رقم + اسم + تواصل */}
+        <Flex align="center" gap={3} px={4} pt={4} pb={3}>
+          <Flex
+            align="center"
+            justify="center"
+            minW="36px"
+            h="36px"
+            borderRadius="lg"
+            bg="#666139"
+            color="white"
+            fontWeight="bold"
+            fontSize="sm"
+            flexShrink={0}
+          >
+            {index + 1}
+          </Flex>
+          <Avatar.Root size="md" bg="#666139" flexShrink={0}>
+            <Avatar.Fallback color="white" fontWeight="bold">
+              {booking.customerName?.charAt(0) || "?"}
+            </Avatar.Fallback>
+          </Avatar.Root>
+          <Box flex={1} minW={0}>
+            <Text
+              fontWeight="bold"
+              fontSize="md"
+              color="#2d3748"
+              lineClamp={2}
+              lineHeight="short"
+            >
+              {booking.customerName}
+            </Text>
+          </Box>
+          <Flex
+            gap={1}
+            flexShrink={0}
+            align="center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <WhatsAppCustomerLink
+              phone={booking.customerPhone}
+              stopClickPropagation
+              showPhoneTooltip
+              boxSize="38px"
+              iconSize={20}
+              pill
+            />
+            {renderMobileBookingMenu(booking)}
+          </Flex>
+        </Flex>
+
+        {/* الوقت والحالات */}
+        <Flex
+          px={4}
+          py={2.5}
+          gap={2}
+          flexWrap="wrap"
+          align="center"
+          bg="whiteAlpha.700"
+          borderTop="1px solid"
+          borderBottom="1px solid"
+          borderColor="blackAlpha.50"
+        >
+          {renderBookingTimeDisplay(booking, true)}
+          {renderExaminationCell(booking)}
+          {getStatusBadge(booking.status)}
+          <Badge
+            variant="subtle"
+            fontSize="xs"
+            colorPalette={booking.bookingType === "online" ? "green" : "blue"}
+          >
+            {booking.bookingType === "online" ? "أونلاين" : "عيادة"}
+          </Badge>
+          <Badge variant="outline" fontSize="xs" colorPalette="purple">
+            {getVisitTypeLabel(booking.visitType)}
+          </Badge>
+        </Flex>
+
+        {/* الخدمات */}
+        <Box px={4} py={3}>
+          <Text fontSize="xs" color="gray.500" fontWeight="medium" mb={2}>
+            الخدمات
+          </Text>
+          {renderProcedureTags(booking, true)}
+        </Box>
+
+        {/* المبلغ والإجراءات */}
+        <Flex
+          px={4}
+          py={3}
+          justify="space-between"
+          align="center"
+          gap={3}
+          borderTop="1px solid"
+          borderColor="gray.100"
+          bg="white"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Box>
+            <Text fontSize="lg" fontWeight="bold" color="#666139" lineHeight="1.2">
+              {formatBookingAmount(booking.amountPaid)}{" "}
+              <Text as="span" fontSize="sm" fontWeight="medium" color="gray.500">
+                ج.م
+              </Text>
+            </Text>
+            <Box mt={1.5}>{renderPaymentBadge(booking)}</Box>
+          </Box>
+          <Button
+            size="sm"
+            variant="outline"
+            colorPalette="blue"
+            borderRadius="lg"
+            px={4}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleEditClick(booking);
+            }}
+          >
+            <Edit2 size={15} />
+            تعديل
+          </Button>
+        </Flex>
+      </Box>
+    );
+  };
 
   return (
     <Box minH="100vh" bg="#f0f1f3" dir="rtl">
@@ -538,6 +990,19 @@ export default function TodayBookings() {
                 طباعة
               </Button>
               <Button
+                variant="outline"
+                borderColor="whiteAlpha.500"
+                color="white"
+                _hover={{ bg: "whiteAlpha.200" }}
+                onClick={handleAddNoTimeClick}
+                size="sm"
+                gap={2}
+                display={{ base: "none", sm: "inline-flex" }}
+              >
+                <CalendarClock size={18} />
+                حجز بدون وقت
+              </Button>
+              <Button
                 bg="white"
                 color="#666139"
                 _hover={{ bg: "whiteAlpha.900" }}
@@ -554,7 +1019,23 @@ export default function TodayBookings() {
 
       <Container maxW="7xl" py={8} mt={-6} position="relative" zIndex={1}>
         {/* Stats Cards */}
-        <SimpleGrid columns={{ base: 1, sm: 2, md: 3 }} gap={4} mb={8}>
+        <Flex justify="flex-end" mb={3} className="no-print">
+          <Button
+            size="sm"
+            variant={showTotalIncome ? "subtle" : "outline"}
+            colorPalette="green"
+            gap={2}
+            onClick={() => setShowTotalIncome((v) => !v)}
+          >
+            {showTotalIncome ? <EyeOff size={16} /> : <Eye size={16} />}
+            {showTotalIncome ? "إخفاء إجمالي الدخل" : "عرض إجمالي الدخل"}
+          </Button>
+        </Flex>
+        <SimpleGrid
+          columns={{ base: 1, sm: 2, md: showTotalIncome ? 3 : 2 }}
+          gap={4}
+          mb={8}
+        >
           <Card.Root bg="white" shadow="md" borderRadius="xl" overflow="hidden">
             <Card.Body
               p={5}
@@ -576,27 +1057,29 @@ export default function TodayBookings() {
               </Box>
             </Card.Body>
           </Card.Root>
-          <Card.Root bg="white" shadow="md" borderRadius="xl" overflow="hidden">
-            <Card.Body
-              p={5}
-              display="flex"
-              flexDirection="row"
-              alignItems="center"
-              gap={4}
-            >
-              <Box p={3} bg="#f4f3ed" borderRadius="xl">
-                <DollarSign size={24} color="#666139" />
-              </Box>
-              <Box>
-                <Text fontSize="xs" color="gray.500" fontWeight="medium">
-                  إجمالي الدخل
-                </Text>
-                <Text fontSize="2xl" fontWeight="bold" color="#666139">
-                  {totalIncome.toFixed(2)} EGP
-                </Text>
-              </Box>
-            </Card.Body>
-          </Card.Root>
+          {showTotalIncome && (
+            <Card.Root bg="white" shadow="md" borderRadius="xl" overflow="hidden">
+              <Card.Body
+                p={5}
+                display="flex"
+                flexDirection="row"
+                alignItems="center"
+                gap={4}
+              >
+                <Box p={3} bg="#f4f3ed" borderRadius="xl">
+                  <DollarSign size={24} color="#666139" />
+                </Box>
+                <Box>
+                  <Text fontSize="xs" color="gray.500" fontWeight="medium">
+                    إجمالي الدخل
+                  </Text>
+                  <Text fontSize="2xl" fontWeight="bold" color="#666139">
+                    {totalIncome.toFixed(2)} EGP
+                  </Text>
+                </Box>
+              </Card.Body>
+            </Card.Root>
+          )}
           <Card.Root bg="white" shadow="md" borderRadius="xl" overflow="hidden">
             <Card.Body p={5} display="flex" flexDirection="row" alignItems="center" gap={4}>
               <Box p={3} bg="blue.50" borderRadius="xl">
@@ -881,6 +1364,38 @@ export default function TodayBookings() {
                     ))}
                   </select>
                 </Box>
+                <Box
+                  bg="gray.50"
+                  border="1px solid"
+                  borderColor="gray.200"
+                  borderRadius="lg"
+                  minW={{ base: "full", sm: "200px" }}
+                  px={1}
+                >
+                  <select
+                    value={filterPaymentMethod}
+                    onChange={(e) =>
+                      setFilterPaymentMethod(e.target.value as PaymentFilterValue)
+                    }
+                    style={{
+                      width: "100%",
+                      background: "transparent",
+                      border: "none",
+                      outline: "none",
+                      padding: "8px 10px",
+                      color: "#374151",
+                      fontSize: "14px",
+                    }}
+                  >
+                    <option value="all">كل طرق الدفع</option>
+                    <option value="none">غير محدد</option>
+                    {CLINIC_PAYMENT_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </Box>
                 <Flex bg="gray.50" p={1} rounded="xl" gap={1}>
                   {(["all", "online", "clinic"] as const).map((type) => (
                     <Button
@@ -967,258 +1482,21 @@ export default function TodayBookings() {
                   </Text>
                 </Box>
               ) : (
-                <SimpleGrid columns={1} gap={4}>
-                  {filteredBookings.map((booking, index) => (
-                    <Box
-                      key={booking.id}
-                      w="full"
-                      textAlign="right"
-                      p={4}
-                      borderRadius="xl"
-                      border="1px solid"
-                      borderColor={
-                        booking.examinationStatus === "done"
-                          ? "green.200"
-                          : booking.examinationStatus === "waiting"
-                            ? "yellow.200"
-                            : "gray.200"
-                      }
-                      bg={
-                        booking.examinationStatus === "done"
-                          ? "#f4f3ed"
-                          : booking.examinationStatus === "waiting"
-                            ? "yellow.50"
-                            : "white"
-                      }
-                      shadow="sm"
-                      _hover={{ shadow: "md", borderColor: "#666139" }}
-                      transition="all 0.2s"
-                      cursor="pointer"
-                      onClick={() =>
-                        router.push(`/patient-history/${booking.id}`)
-                      }
-                    >
-                      <Flex justify="space-between" align="start" gap={3}>
-                        <Flex
-                          direction="column"
-                          align="end"
-                          gap={1}
-                          flexShrink={0}
-                        >
-                          {getExaminationStatusBadge(booking.examinationStatus)}
-                          {getStatusBadge(booking.status)}
-                          <Badge
-                            colorScheme={
-                              booking.bookingType === "online"
-                                ? "green"
-                                : "blue"
-                            }
-                            variant="subtle"
-                            fontSize="xs"
-                          >
-                            {booking.bookingType === "online"
-                              ? "أونلاين"
-                              : "عيادة"}
-                          </Badge>
-                        </Flex>
-                        <Flex align="center" gap={3} flex={1} minW={0}>
-                          <Text
-                            fontWeight="bold"
-                            fontSize="lg"
-                            color="#666139"
-                            minW="28px"
-                            flexShrink={0}
-                          >
-                            {index + 1}
-                          </Text>
-                          <Avatar.Root size="sm" flexShrink={0} bg="#666139">
-                            <Avatar.Fallback
-                              color="white"
-                              fontWeight="bold"
-                              fontSize="sm"
-                            >
-                              {booking.customerName?.charAt(0) || "?"}
-                            </Avatar.Fallback>
-                          </Avatar.Root>
-                          <Box minW={0}>
-                            <Text
-                              fontWeight="bold"
-                              fontSize="lg"
-                              color="#2d3748"
-                              // @ts-ignore
-                              noOfLines={1}
-                            >
-                              {booking.customerName}
-                            </Text>
-                            <Flex
-                              align="center"
-                              gap={2.5}
-                              mt={1}
-                              w="100%"
-                              maxW="100%"
-                              bg="#f4f3ed"
-                              borderRadius="xl"
-                              borderWidth="1px"
-                              borderColor="rgba(102, 97, 57, 0.18)"
-                              px={3}
-                              py={2}
-                              boxShadow="sm"
-                            >
-                              <Box
-                                as="span"
-                                display="flex"
-                                alignItems="center"
-                                justifyContent="center"
-                                color="#666139"
-                                opacity={0.85}
-                                flexShrink={0}
-                              >
-                                <Phone size={18} strokeWidth={2} />
-                              </Box>
-                              <Text
-                                fontSize="sm"
-                                color="gray.700"
-                                fontWeight="medium"
-                                fontFamily="monospace"
-                                dir="ltr"
-                                flex="1"
-                                minW={0}
-                              >
-                                {booking.customerPhone}
-                              </Text>
-                              <Box flexShrink={0} lineHeight={0}>
-                                <WhatsAppCustomerLink
-                                  phone={booking.customerPhone}
-                                  stopClickPropagation
-                                  boxSize="40px"
-                                  iconSize={21}
-                                  pill
-                                />
-                              </Box>
-                            </Flex>
-                            <Flex align="center" gap={2} mt={1}>
-                              <Text
-                                fontSize="sm"
-                                fontWeight="bold"
-                                color="#666139"
-                              >
-                                {formatTime(booking)}
-                              </Text>
-                              <Badge
-                                colorScheme={
-                                  booking.visitType === "checkup"
-                                    ? "purple"
-                                    : booking.visitType === "followup"
-                                      ? "orange"
-                                      : "blue"
-                                }
-                                variant="subtle"
-                                fontSize="xs"
-                              >
-                                {booking.visitType === "checkup"
-                                  ? "كشف"
-                                  : booking.visitType === "followup"
-                                    ? "إعادة"
-                                    : booking.visitType === "consultation"
-                                      ? "استشارة"
-                                      : booking.visitType ?? "-"}
-                              </Badge>
-                              {booking.procedureType && (
-                                <Badge variant="outline" fontSize="xs" colorScheme="teal">
-                                  {booking.procedureType}
-                                </Badge>
-                              )}
-                            </Flex>
-                          </Box>
-                        </Flex>
-                      </Flex>
-                      <Flex
-                        justify="space-between"
-                        align="center"
-                        mt={4}
-                        pt={3}
-                        borderTop="1px solid"
-                        borderColor="gray.100"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <Text fontWeight="bold" color="#666139">
-                          {formatAmount(booking.amountPaid)} EGP
-                        </Text>
-                        <Flex gap={2}>
-                          <Button
-                            size="xs"
-                            variant="outline"
-                            colorScheme="blue"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleEditClick(booking);
-                            }}
-                          >
-                            تعديل
-                          </Button>
-                          <MenuRoot>
-                            <MenuTrigger asChild>
-                              <IconButton
-                                aria-label="المزيد"
-                                size="xs"
-                                variant="ghost"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <MoreVertical size={16} />
-                              </IconButton>
-                            </MenuTrigger>
-                            <MenuContent>
-                              {booking.bookingType === "online" && (
-                                <>
-                                  <MenuItem
-                                    value="pending"
-                                    onClick={() =>
-                                      handleStatusChange(booking.id, "pending")
-                                    }
-                                  >
-                                    قيد الانتظار
-                                  </MenuItem>
-                                  <MenuItem
-                                    value="confirmed"
-                                    onClick={() =>
-                                      handleStatusChange(
-                                        booking.id,
-                                        "confirmed"
-                                      )
-                                    }
-                                  >
-                                    تأكيد
-                                  </MenuItem>
-                                  <MenuItem
-                                    value="rejected"
-                                    onClick={() =>
-                                      handleStatusChange(booking.id, "rejected")
-                                    }
-                                  >
-                                    رفض
-                                  </MenuItem>
-                                </>
-                              )}
-                              <MenuItem
-                                value="cancelled"
-                                onClick={() => handleDeleteClick(booking.id)}
-                                color="red.500"
-                              >
-                                إلغاء الحجز
-                              </MenuItem>
-                            </MenuContent>
-                          </MenuRoot>
-                        </Flex>
-                      </Flex>
-                    </Box>
-                  ))}
+                <SimpleGrid columns={1} gap={3}>
+                  {filteredBookings.map((booking, index) =>
+                    renderMobileBookingCard(booking, index),
+                  )}
                 </SimpleGrid>
               )}
             </Box>
 
             {/* Desktop Table */}
-            <Box display={{ base: "none", md: "block" }}>
-              <Table.Root>
+            <Box
+              display={{ base: "none", md: "block" }}
+              overflowX="auto"
+              p={{ base: 0, md: 4 }}
+            >
+              <Table.Root size="sm" variant="outline" striped>
                 <Table.Header
                   bg="#fdfbf7"
                   borderBottom="2px solid"
@@ -1253,8 +1531,10 @@ export default function TodayBookings() {
                       fontWeight="bold"
                       color="gray.600"
                       textTransform="uppercase"
+                      w="72px"
+                      textAlign="center"
                     >
-                      الهاتف
+                      واتساب
                     </Table.ColumnHeader>
                     <Table.ColumnHeader
                       py={4}
@@ -1263,28 +1543,9 @@ export default function TodayBookings() {
                       fontWeight="bold"
                       color="gray.600"
                       textTransform="uppercase"
+                      minW="180px"
                     >
-                      النوع
-                    </Table.ColumnHeader>
-                    <Table.ColumnHeader
-                      py={4}
-                      px={4}
-                      fontSize="xs"
-                      fontWeight="bold"
-                      color="gray.600"
-                      textTransform="uppercase"
-                    >
-                      نوع الزيارة
-                    </Table.ColumnHeader>
-                    <Table.ColumnHeader
-                      py={4}
-                      px={4}
-                      fontSize="xs"
-                      fontWeight="bold"
-                      color="gray.600"
-                      textTransform="uppercase"
-                    >
-                      الإجراء
+                      الخدمات
                     </Table.ColumnHeader>
                     <Table.ColumnHeader
                       py={4}
@@ -1304,7 +1565,7 @@ export default function TodayBookings() {
                       color="gray.600"
                       textTransform="uppercase"
                     >
-                      المبلغ
+                      المبلغ / الدفع
                     </Table.ColumnHeader>
                     <Table.ColumnHeader
                       py={4}
@@ -1342,7 +1603,7 @@ export default function TodayBookings() {
                 <Table.Body>
                   {filteredBookings.length === 0 ? (
                     <Table.Row>
-                      <Table.Cell colSpan={11} textAlign="center" py={16}>
+                      <Table.Cell colSpan={9} textAlign="center" py={16}>
                         <Users
                           size={48}
                           color="#e2e8f0"
@@ -1360,10 +1621,15 @@ export default function TodayBookings() {
                     filteredBookings.map((booking, index) => (
                       <Table.Row
                         key={booking.id}
-                        bg={getRowBg(booking.examinationStatus)}
+                        bg={
+                          booking.isExtraBooking
+                            ? "orange.50"
+                            : getRowBg(booking.examinationStatus)
+                        }
                         _hover={{
-                          bg:
-                            booking.examinationStatus === "done"
+                          bg: booking.isExtraBooking
+                            ? "orange.100"
+                            : booking.examinationStatus === "done"
                               ? "#e0decc"
                               : booking.examinationStatus === "waiting"
                                 ? "yellow.100"
@@ -1401,90 +1667,30 @@ export default function TodayBookings() {
                             </Text>
                           </Flex>
                         </Table.Cell>
-                        <Table.Cell
-                          py={4}
-                          px={4}
-                          fontSize="sm"
-                          color="gray.600"
-                        >
-                          <Flex
-                            align="center"
-                            gap={2}
-                            flexWrap="nowrap"
-                            bg="gray.50"
-                            borderRadius="lg"
-                            borderWidth="1px"
-                            borderColor="gray.200"
-                            px={2.5}
-                            py={1.5}
-                            w="fit-content"
-                            maxW="100%"
-                          >
-                            <Box color="#666139" opacity={0.9} flexShrink={0}>
-                              <Phone size={15} strokeWidth={2} />
-                            </Box>
-                            <Text
-                              fontFamily="monospace"
-                              dir="ltr"
-                              fontSize="sm"
-                              color="gray.700"
-                              fontWeight="medium"
-                            >
-                              {booking.customerPhone}
-                            </Text>
-                            <Box flexShrink={0} lineHeight={0}>
-                              <WhatsAppCustomerLink
-                                phone={booking.customerPhone}
-                                stopClickPropagation
-                                boxSize="34px"
-                                iconSize={19}
-                                pill
-                              />
-                            </Box>
+                        <Table.Cell py={4} px={2} textAlign="center">
+                          <Flex justify="center">
+                            <WhatsAppCustomerLink
+                              phone={booking.customerPhone}
+                              stopClickPropagation
+                              showPhoneTooltip
+                              boxSize="40px"
+                              iconSize={21}
+                              pill
+                            />
                           </Flex>
                         </Table.Cell>
                         <Table.Cell py={4} px={4}>
-                          <Badge
-                            colorScheme={
-                              booking.bookingType === "online"
-                                ? "green"
-                                : "blue"
-                            }
-                            variant="subtle"
-                            px={2}
-                            py={0.5}
-                            rounded="full"
-                          >
-                            {booking.bookingType === "online"
-                              ? "أونلاين"
-                              : "في العيادة"}
-                          </Badge>
-                        </Table.Cell>
-                        <Table.Cell py={4} px={4}>
-                          <Badge
-                            colorScheme={
-                              booking.visitType === "checkup"
-                                ? "purple"
-                                : booking.visitType === "followup"
-                                  ? "orange"
-                                  : "blue"
-                            }
-                            variant="subtle"
-                            px={2}
-                            py={0.5}
-                            rounded="full"
-                          >
-                            {booking.visitType === "checkup"
-                              ? "كشف"
-                              : booking.visitType === "followup"
-                                ? "إعادة"
-                                : booking.visitType === "consultation"
-                                  ? "استشارة"
-                                  : booking.visitType ?? "-"}
-                          </Badge>
-                        </Table.Cell>
-                        <Table.Cell py={4} px={4} fontSize="sm" color="gray.700">
-                          {booking.procedureType || "-"}
+                          <Box>
+                            {renderProcedureTags(booking)}
+                            <Flex gap={1} mt={1.5} flexWrap="wrap">
+                              <Badge fontSize="xs" variant="subtle" colorScheme="blue">
+                                {booking.bookingType === "online" ? "أونلاين" : "عيادة"}
+                              </Badge>
+                              <Badge fontSize="xs" variant="outline" colorScheme="purple">
+                                {getVisitTypeLabel(booking.visitType)}
+                              </Badge>
+                            </Flex>
+                          </Box>
                         </Table.Cell>
                         <Table.Cell
                           py={4}
@@ -1492,18 +1698,18 @@ export default function TodayBookings() {
                           fontWeight="medium"
                           color="gray.700"
                         >
-                          {formatTime(booking)}
-                        </Table.Cell>
-                        <Table.Cell
-                          py={4}
-                          px={4}
-                          fontWeight="bold"
-                          color="#666139"
-                        >
-                          {formatAmount(booking.amountPaid)} EGP
+                          {renderBookingTimeDisplay(booking)}
                         </Table.Cell>
                         <Table.Cell py={4} px={4}>
-                          {getExaminationStatusBadge(booking.examinationStatus)}
+                          <Flex direction="column" align="flex-start" gap={1}>
+                            <Text fontWeight="bold" color="#666139">
+                              {formatBookingAmount(booking.amountPaid)} EGP
+                            </Text>
+                            {renderPaymentBadge(booking)}
+                          </Flex>
+                        </Table.Cell>
+                        <Table.Cell py={4} px={4}>
+                          {renderExaminationCell(booking)}
                         </Table.Cell>
                         <Table.Cell py={4} px={4}>
                           {getStatusBadge(booking.status)}
@@ -1615,10 +1821,15 @@ export default function TodayBookings() {
 
       <BookingModal
         isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
+        onClose={() => {
+          setIsModalOpen(false);
+          setModalDefaultNoTime(false);
+        }}
         onSave={handleSaveBooking}
         initialData={editingBooking}
         doctorId={selectedDoctorId || getCurrentDoctorId()}
+        defaultDate={rangeStart}
+        defaultNoTime={modalDefaultNoTime}
       />
 
       <style jsx global>{`

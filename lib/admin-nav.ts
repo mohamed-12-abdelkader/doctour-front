@@ -6,6 +6,7 @@ import {
   Home,
   Users,
   Clock,
+  Layers,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -85,6 +86,18 @@ export const PAGE_LINKS: AdminPageLink[] = [
     bg: "#fff7ed",
     group: "الإدارة",
     permission: "manage_accounts",
+  },
+  {
+    href: "/admin/clinic-services",
+    title: "خدمات العيادة",
+    description:
+      "إضافة وتعديل وتعطيل الخدمات المستخدمة في الحجز (كشف، بوتوكس، ليزر…)",
+    icon: Layers,
+    color: "#0d9488",
+    bg: "#f0fdfa",
+    group: "الإدارة",
+    permission: "manage_daily_bookings",
+    showOnlyForFullAdmin: true,
   },
 ];
 

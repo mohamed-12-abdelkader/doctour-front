@@ -2,26 +2,38 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import {
   Box,
   Flex,
   Button,
   Stack,
-  Link as ChakraLink,
   useDisclosure,
   Container,
   Text,
   Collapsible,
   useBreakpointValue,
+  MenuRoot,
+  MenuTrigger,
+  MenuContent,
+  MenuItem,
+  Separator,
 } from "@chakra-ui/react";
-import { useRouter } from "next/navigation";
-import { AlignJustify, X, LogOut } from "lucide-react";
+import {
+  AlignJustify,
+  X,
+  LogOut,
+  ChevronDown,
+  LayoutDashboard,
+} from "lucide-react";
 import SlotBookingModal from "@/components/SlotBookingModal";
 import {
   isAdminLoggedIn,
   getCurrentUserPermissions,
   getIsFullAdmin,
   getVisibleNavLinks,
+  type AdminPageLink,
 } from "@/lib/admin-nav";
 import logoImg from "@/images/logo.png";
 
@@ -61,10 +73,172 @@ const PUBLIC_LINKS = [
   { name: "خدماتنا", href: "/#services" },
   { name: "آراء العملاء", href: "/#reviews" },
   { name: "تواصل معنا", href: "/#contact" },
-];
+] as const;
+
+function isLinkActive(pathname: string, href: string): boolean {
+  if (href === "/") return pathname === "/";
+  const base = href.split("#")[0];
+  if (!base || base === "/") return pathname === "/";
+  return pathname === base || pathname.startsWith(`${base}/`);
+}
+
+function NavLinkPill({
+  href,
+  children,
+  active,
+  size = "md",
+  onClick,
+}: {
+  href: string;
+  children: React.ReactNode;
+  active?: boolean;
+  size?: "sm" | "md";
+  onClick?: () => void;
+}) {
+  const fontSize = size === "sm" ? "sm" : { base: "sm", lg: "md" };
+  const py = size === "sm" ? 1.5 : 2;
+  const px = size === "sm" ? 3 : { base: 3, lg: 4 };
+
+  return (
+    <Box
+      as={Link}
+      href={href}
+      onClick={onClick}
+      fontSize={fontSize}
+      fontWeight={active ? "bold" : "semibold"}
+      color={active ? "white" : BRAND.color}
+      bg={active ? BRAND.color : "transparent"}
+      py={py}
+      px={px}
+      borderRadius="full"
+      whiteSpace="nowrap"
+      transition="all 0.2s"
+      _hover={{
+        textDecoration: "none",
+        bg: active ? BRAND.colorHover : "blackAlpha.50",
+        color: active ? "white" : BRAND.colorHover,
+      }}
+    >
+      {children}
+    </Box>
+  );
+}
+
+function AdminGroupMenu({
+  group,
+  links,
+  pathname,
+}: {
+  group: string;
+  links: AdminPageLink[];
+  pathname: string;
+}) {
+  const hasActive = links.some((l) => isLinkActive(pathname, l.href));
+
+  return (
+    <MenuRoot positioning={{ placement: "bottom-end" }}>
+      <MenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          fontWeight="semibold"
+          color={hasActive ? "white" : BRAND.color}
+          bg={hasActive ? BRAND.color : "transparent"}
+          borderRadius="full"
+          px={3}
+          gap={1}
+          _hover={{
+            bg: hasActive ? BRAND.colorHover : "blackAlpha.50",
+            color: hasActive ? "white" : BRAND.colorHover,
+          }}
+        >
+          {group}
+          <ChevronDown size={16} />
+        </Button>
+      </MenuTrigger>
+      <MenuContent minW="220px" p={1}>
+        {links.map((link) => {
+          const Icon = link.icon;
+          const active = isLinkActive(pathname, link.href);
+          return (
+            <MenuItem
+              key={link.href}
+              value={link.href}
+              asChild
+              bg={active ? "blackAlpha.50" : undefined}
+            >
+              <Link href={link.href}>
+                <Flex align="center" gap={2} w="full" py={0.5}>
+                  <Box
+                    p={1.5}
+                    borderRadius="md"
+                    bg={link.bg}
+                    color={link.color}
+                    flexShrink={0}
+                  >
+                    <Icon size={16} />
+                  </Box>
+                  <Text fontWeight={active ? "bold" : "medium"} fontSize="sm">
+                    {link.title}
+                  </Text>
+                </Flex>
+              </Link>
+            </MenuItem>
+          );
+        })}
+      </MenuContent>
+    </MenuRoot>
+  );
+}
+
+function MobileAdminLink({
+  link,
+  active,
+  onNavigate,
+}: {
+  link: AdminPageLink;
+  active: boolean;
+  onNavigate: () => void;
+}) {
+  const Icon = link.icon;
+  return (
+    <Box
+      as={Link}
+      href={link.href}
+      onClick={onNavigate}
+      display="flex"
+      alignItems="center"
+      gap={3}
+      py={3}
+      px={4}
+      mx={1}
+      borderRadius="xl"
+      bg={active ? "blackAlpha.50" : "transparent"}
+      borderWidth={active ? "1px" : "0"}
+      borderColor={active ? BRAND.border : "transparent"}
+      fontWeight={active ? "bold" : "medium"}
+      color={BRAND.color}
+      _hover={{ bg: "blackAlpha.50", textDecoration: "none" }}
+      transition="background 0.15s"
+    >
+      <Box p={2} borderRadius="lg" bg={link.bg} color={link.color} flexShrink={0}>
+        <Icon size={18} />
+      </Box>
+      <Box flex={1} minW={0}>
+        <Text fontSize="sm" lineHeight="short">
+          {link.title}
+        </Text>
+        <Text fontSize="xs" color="gray.500" lineClamp={1}>
+          {link.description}
+        </Text>
+      </Box>
+    </Box>
+  );
+}
 
 export default function Navbar() {
   const router = useRouter();
+  const pathname = usePathname();
   const { open, onToggle } = useDisclosure();
   const {
     open: isBookingOpen,
@@ -104,23 +278,28 @@ export default function Navbar() {
 
   const adminLinks = useMemo(
     () =>
-      loggedIn
-        ? getVisibleNavLinks(permissions, isFullAdmin).map((l) => ({
-          name: l.title,
-          href: l.href,
-        }))
-        : [],
+      loggedIn ? getVisibleNavLinks(permissions, isFullAdmin) : [],
     [loggedIn, permissions, isFullAdmin],
   );
 
-  const links = useMemo(() => {
-    if (!mounted) return PUBLIC_LINKS;
-    if (loggedIn) {
-      if (role === "doctor") return [];
-      return [{ name: "لوحة التحكم", href: "/admin/dashboard" }, ...adminLinks];
+  const adminGroups = useMemo(
+    () => [...new Set(adminLinks.map((l) => l.group))],
+    [adminLinks],
+  );
+
+  const linksByGroup = useMemo(() => {
+    const map = new Map<string, AdminPageLink[]>();
+    for (const g of adminGroups) {
+      map.set(
+        g,
+        adminLinks.filter((l) => l.group === g),
+      );
     }
-    return PUBLIC_LINKS;
-  }, [mounted, loggedIn, adminLinks, role]);
+    return map;
+  }, [adminLinks, adminGroups]);
+
+  const isDoctorNav = mounted && loggedIn && role === "doctor";
+  const isAdminNav = mounted && loggedIn && !isDoctorNav;
 
   const handleLogout = () => {
     if (typeof window !== "undefined") {
@@ -135,6 +314,134 @@ export default function Navbar() {
     router.push("/admin/login");
   };
 
+  const closeMobile = () => {
+    if (open) onToggle();
+  };
+
+  const renderDesktopLinks = () => {
+    if (!mounted) {
+      return PUBLIC_LINKS.map((link) => (
+        <NavLinkPill key={link.name} href={link.href} size="md">
+          {link.name}
+        </NavLinkPill>
+      ));
+    }
+
+    if (isDoctorNav) return null;
+
+    if (isAdminNav) {
+      return (
+        <Flex align="center" gap={1} flexWrap="wrap" justify="flex-start">
+          <NavLinkPill
+            href="/admin/dashboard"
+            active={isLinkActive(pathname, "/admin/dashboard")}
+            size="sm"
+          >
+            <Flex align="center" gap={1.5} as="span">
+              <LayoutDashboard size={16} />
+              لوحة التحكم
+            </Flex>
+          </NavLinkPill>
+          {adminGroups.map((group) => (
+            <AdminGroupMenu
+              key={group}
+              group={group}
+              links={linksByGroup.get(group) ?? []}
+              pathname={pathname}
+            />
+          ))}
+        </Flex>
+      );
+    }
+
+    return PUBLIC_LINKS.map((link) => (
+      <NavLinkPill
+        key={link.name}
+        href={link.href}
+        active={isLinkActive(pathname, link.href)}
+        size="md"
+      >
+        {link.name}
+      </NavLinkPill>
+    ));
+  };
+
+  const renderMobileLinks = () => {
+    if (!mounted) {
+      return PUBLIC_LINKS.map((link) => (
+        <NavLinkPill
+          key={link.name}
+          href={link.href}
+          onClick={closeMobile}
+          size="md"
+        >
+          {link.name}
+        </NavLinkPill>
+      ));
+    }
+
+    if (isDoctorNav) return null;
+
+    if (isAdminNav) {
+      return (
+        <Stack gap={2} align="stretch">
+          <NavLinkPill
+            href="/admin/dashboard"
+            active={isLinkActive(pathname, "/admin/dashboard")}
+            onClick={closeMobile}
+            size="md"
+          >
+            <Flex align="center" gap={2} as="span">
+              <LayoutDashboard size={18} />
+              لوحة التحكم
+            </Flex>
+          </NavLinkPill>
+          {adminGroups.map((group, gi) => (
+            <Box key={group}>
+              {gi > 0 && <Separator my={2} borderColor="gray.100" />}
+              <Text
+                fontSize="xs"
+                fontWeight="bold"
+                color="gray.500"
+                px={4}
+                py={1}
+                letterSpacing="wide"
+              >
+                {group}
+              </Text>
+              <Stack gap={0.5} align="stretch">
+                {(linksByGroup.get(group) ?? []).map((link) => (
+                  <MobileAdminLink
+                    key={link.href}
+                    link={link}
+                    active={isLinkActive(pathname, link.href)}
+                    onNavigate={closeMobile}
+                  />
+                ))}
+              </Stack>
+            </Box>
+          ))}
+        </Stack>
+      );
+    }
+
+    return (
+      <Stack gap={1} align="stretch">
+        {PUBLIC_LINKS.map((link) => (
+          <NavLinkPill
+            key={link.name}
+            href={link.href}
+            active={isLinkActive(pathname, link.href)}
+            onClick={closeMobile}
+            size="md"
+          >
+            {link.name}
+          </NavLinkPill>
+        ))}
+      </Stack>
+    );
+  };
+
   return (
     <Box
       as="nav"
@@ -145,7 +452,6 @@ export default function Navbar() {
       dir="rtl"
       px={{ base: 3, sm: 4 }}
     >
-      {/* غلاف حتى يبقى النافبار فوق الستارة على الموبايل */}
       <Box position="relative" zIndex={1001}>
         <Container maxW="6xl">
           <Box
@@ -161,33 +467,16 @@ export default function Navbar() {
             shadow="sm"
           >
             <Flex alignItems="center" justifyContent="space-between" gap={3}>
-              {/* Desktop: روابط | موبايل: زر القائمة */}
-              <Stack
-                direction="row"
-                gap={loggedIn ? { md: 3, lg: 4 } : { md: 6, lg: 8 }}
+              <Flex
+                align="center"
+                gap={2}
+                flex={1}
+                minW={0}
                 display={{ base: "none", md: "flex" }}
-                alignItems="center"
               >
-                {links.map((link) => (
-                  <ChakraLink
-                    key={link.name}
-                    href={link.href}
-                    fontSize={loggedIn ? "sm" : "lg"}
-                    fontWeight="bold"
-                    color={BRAND.color}
-                    _hover={{
-                      textDecoration: "none",
-                      opacity: 0.85,
-                      color: BRAND.colorHover,
-                    }}
-                    transition="color 0.2s"
-                  >
-                    {link.name}
-                  </ChakraLink>
-                ))}
-              </Stack>
+                {renderDesktopLinks()}
+              </Flex>
 
-              {/* موبايل: أيقونة واضحة لفتح/إغلاق القائمة */}
               <Box display={{ base: "flex", md: "none" }} flexShrink={0}>
                 <Button
                   onClick={onToggle}
@@ -199,24 +488,18 @@ export default function Navbar() {
                   minH={12}
                   px={4}
                   borderRadius="xl"
-                  gap={2}
-                  fontWeight="bold"
+                  aria-label={open ? "إغلاق القائمة" : "فتح القائمة"}
                   _hover={{ bg: "blackAlpha.50", borderColor: BRAND.color }}
                   _active={{ bg: "blackAlpha.100" }}
                 >
                   {open ? (
-                    <>
-                      <X size={24} strokeWidth={2.5} />
-                    </>
+                    <X size={24} strokeWidth={2.5} />
                   ) : (
-                    <>
-                      <AlignJustify size={24} strokeWidth={2.5} />
-                    </>
+                    <AlignJustify size={24} strokeWidth={2.5} />
                   )}
                 </Button>
               </Box>
 
-              {/* لوجو + زر حجز أو تسجيل خروج (ديسكتوب فقط) */}
               <Flex align="center" gap={{ base: 2, md: 4 }} flexShrink={0}>
                 {mounted && loggedIn && (
                   <Button
@@ -226,18 +509,30 @@ export default function Navbar() {
                     colorScheme="red"
                     size="sm"
                     borderRadius="full"
-                    px={6}
+                    px={5}
                     gap={2}
                   >
                     <LogOut size={16} />
                     تسجيل خروج
                   </Button>
                 )}
-                <Logo />
+                <Box
+                  as={Link}
+                  href={
+                    isDoctorNav
+                      ? "/doctor-appointments"
+                      : isAdminNav
+                        ? "/admin/dashboard"
+                        : "/"
+                  }
+                  _hover={{ opacity: 0.9 }}
+                  transition="opacity 0.2s"
+                >
+                  <Logo />
+                </Box>
               </Flex>
             </Flex>
 
-            {/* قائمة الموبايل مع انيميشن (Chakra v3 Collapsible) */}
             <Collapsible.Root
               open={open}
               onOpenChange={(e) => {
@@ -253,34 +548,16 @@ export default function Navbar() {
                   borderTop="1px solid"
                   borderColor="gray.100"
                 >
-                  <Stack as="nav" gap={0} align="stretch">
-                    {links.map((link) => (
-                      <ChakraLink
-                        key={link.name}
-                        href={link.href}
-                        onClick={onToggle}
-                        fontSize={loggedIn ? "sm" : "md"}
-                        fontWeight="medium"
-                        color={BRAND.color}
-                        py={3}
-                        px={4}
-                        borderRadius="lg"
-                        mx={1}
-                        _hover={{ bg: "blackAlpha.50", textDecoration: "none" }}
-                        _active={{ bg: "blackAlpha.100" }}
-                        transition="background 0.15s"
-                      >
-                        {link.name}
-                      </ChakraLink>
-                    ))}
+                  <Stack as="nav" gap={2} align="stretch">
+                    {renderMobileLinks()}
                     {mounted && loggedIn && (
-                      <Box px={2} pt={2} pb={1}>
+                      <Box px={1} pt={2}>
                         <Button
                           w="full"
                           size="lg"
                           onClick={() => {
                             handleLogout();
-                            onToggle();
+                            closeMobile();
                           }}
                           variant="outline"
                           colorScheme="red"
@@ -301,7 +578,6 @@ export default function Navbar() {
         </Container>
       </Box>
 
-      {/* ستارة خلفية على الموبايل عند فتح القائمة (الضغط عليها يغلق القائمة) */}
       {isMobile && open && (
         <Box
           position="fixed"

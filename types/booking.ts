@@ -1,6 +1,19 @@
 export type BookingType = 'online' | 'clinic';
 export type BookingStatus = 'pending' | 'confirmed' | 'cancelled' | 'rejected';
 export type VisitType = 'checkup' | 'followup' | 'consultation';
+
+/** طريقة الدفع — POST /bookings/clinic */
+export type ClinicPaymentMethod = 'cash' | 'visa' | 'vodafone_cash' | 'instapay';
+
+export const CLINIC_PAYMENT_OPTIONS: {
+    value: ClinicPaymentMethod;
+    label: string;
+}[] = [
+    { value: 'cash', label: 'نقدي' },
+    { value: 'visa', label: 'فيزا' },
+    { value: 'vodafone_cash', label: 'فودافون كاش' },
+    { value: 'instapay', label: 'انستا باي' },
+];
 export type ExaminationStatus = 'waiting' | 'done';
 
 export interface Booking {
@@ -12,11 +25,22 @@ export interface Booking {
     appointmentDate: string | null;
     bookingType: BookingType;
     amountPaid: string | number;
+    paymentMethod?: ClinicPaymentMethod | null;
+    paymentMethodLabel?: string | null;
     status: BookingStatus;
     /** نوع الزيارة: checkup/followup/consultation أو اسم الخدمة من BOOKING_SERVICES */
     visitType?: VisitType | string;
-    /** نوع الإجراء/الخدمة (clinic) */
+    /** نوع الإجراء/الخدمة (clinic) — نص مجمّع */
     procedureType?: string | null;
+    /** أنواع الإجراءات من الـ API */
+    procedureTypes?: string[];
+    appointmentTime?: string | null;
+    appointmentTime24?: string | null;
+    /** false = حجز لليوم بدون وقت محدد */
+    hasSpecificTime?: boolean;
+    /** true = حجز إضافي بعد امتلاء سعة اليوم */
+    isExtraBooking?: boolean;
+    age?: number | null;
     examinationStatus?: ExaminationStatus;
     /** الأونلاين فقط: التاريخ المفضل */
     preferredDate?: string | null;
@@ -38,9 +62,18 @@ export interface CreateClinicBookingData {
     date: string;        // YYYY-MM-DD (الـ API بيتوقع date مش dateTime)
     /** اختياري: وقت الحجز (HH:mm) — يُرسل في حقل time حسب توثيق الـ API */
     time?: string;
+    /** true = حجز لليوم بدون وقت محدد */
+    noTime?: boolean;
+    /** true = السماح بحجز إضافي عند امتلاء السعة */
+    allowExtraBooking?: boolean;
     doctorId?: number;
-    amountPaid?: number;
-    /** نوع الحجز: من قائمة الخدمات (BOOKING_SERVICES) أو القيم القديمة checkup/followup/consultation */
+    amountPaid: number;
+    paymentMethod: ClinicPaymentMethod;
+    /** أنواع الإجراء/الخدمة */
+    procedureTypes?: string[];
+    /** عدة أنواع — متابعة تُرسل كـ «إعادة» */
+    visitTypes?: string[];
+    /** @deprecated للتوافق — يُفضّل procedureTypes */
     visitType?: VisitType | string;
 }
 
@@ -52,7 +85,9 @@ export interface UpdateBookingData {
     time?: string;
     doctorId?: number;
     amountPaid?: number;
+    paymentMethod?: ClinicPaymentMethod;
     visitType?: VisitType | string;
+    visitTypes?: string[];
 }
 
 // ─── Online booking creation (Public) ────────────────────────────────────────

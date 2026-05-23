@@ -1,6 +1,6 @@
 "use client";
 
-import { Box } from "@chakra-ui/react";
+import { Box, Tooltip } from "@chakra-ui/react";
 import { whatsappChatUrlFromPhone } from "@/lib/whatsapp";
 
 function WhatsAppGlyph({ size = 18 }: { size?: number }) {
@@ -25,6 +25,8 @@ type Props = {
   boxSize?: string;
   /** زر دائري بخلفية خضراء فاتحة — مناسب داخل صفوف الهاتف */
   pill?: boolean;
+  /** عرض رقم الهاتف في tooltip عند الوقوف */
+  showPhoneTooltip?: boolean;
 };
 
 export function WhatsAppCustomerLink({
@@ -33,11 +35,13 @@ export function WhatsAppCustomerLink({
   iconSize = 18,
   boxSize = "32px",
   pill = false,
+  showPhoneTooltip = false,
 }: Props) {
   const href = whatsappChatUrlFromPhone(phone ?? "");
+  const phoneLabel = (phone ?? "").trim();
   if (!href) return null;
 
-  return (
+  const link = (
     <Box
       display="inline-flex"
       alignItems="center"
@@ -70,7 +74,11 @@ export function WhatsAppCustomerLink({
           href={href}
           target="_blank"
           rel="noopener noreferrer"
-          aria-label="فتح محادثة واتساب مع العميل"
+          aria-label={
+            phoneLabel
+              ? `واتساب: ${phoneLabel}`
+              : "فتح محادثة واتساب مع العميل"
+          }
           onClick={
             stopClickPropagation ? (e) => e.stopPropagation() : undefined
           }
@@ -80,5 +88,27 @@ export function WhatsAppCustomerLink({
         </a>
       </Box>
     </Box>
+  );
+
+  if (!showPhoneTooltip || !phoneLabel) return link;
+
+  return (
+    <Tooltip.Root openDelay={250} closeDelay={100}>
+      <Tooltip.Trigger asChild>{link}</Tooltip.Trigger>
+      <Tooltip.Positioner>
+        <Tooltip.Content
+          bg="gray.800"
+          color="white"
+          px={3}
+          py={2}
+          borderRadius="md"
+          fontSize="sm"
+          fontFamily="monospace"
+          dir="ltr"
+        >
+          {phoneLabel}
+        </Tooltip.Content>
+      </Tooltip.Positioner>
+    </Tooltip.Root>
   );
 }

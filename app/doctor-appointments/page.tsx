@@ -16,11 +16,7 @@ import {
 import { Booking, BookingStatus, ExaminationStatus } from '@/types/booking'
 import api from '@/lib/axios'
 import { toaster } from '@/components/ui/toaster'
-
-function getIsAdmin(): boolean {
-    if (typeof document === 'undefined') return false
-    return document.cookie.includes('admin-token=')
-}
+import { canChangeExaminationStatus, getCurrentRole } from '@/lib/doctor-context'
 
 // ─── Calendar helpers ──────────────────────────────────────────────────────────
 const AR_WEEKDAYS = ['السبت', 'الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة']
@@ -50,7 +46,7 @@ export default function DoctorAppointments() {
     const [searchQuery, setSearchQuery] = useState('')
     const [examinationFilter, setExaminationFilter] = useState<'all' | ExaminationStatus>('all')
     const [isLoading, setIsLoading] = useState(true)
-    const [isAdmin, setIsAdmin] = useState(false)
+    const [canManageExamination, setCanManageExamination] = useState(false)
     const [changingExaminationId, setChangingExaminationId] = useState<number | null>(null)
 
     // ── Date range state ──────────────────────────────────────────────────────
@@ -137,17 +133,25 @@ export default function DoctorAppointments() {
         document.addEventListener('visibilitychange', onVis)
         return () => document.removeEventListener('visibilitychange', onVis)
     }, [fetchBookings])
-    useEffect(() => { setIsAdmin(getIsAdmin()) }, [])
+    useEffect(() => {
+        setCanManageExamination(canChangeExaminationStatus(getCurrentRole()))
+    }, [])
 
     // ── Filtered data ─────────────────────────────────────────────────────────
     const filteredBookings = useMemo(() => {
-        return bookings.filter(b => {
-            const matchesSearch = !searchQuery ||
-                b.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                b.customerPhone.includes(searchQuery)
-            const matchesFilter = examinationFilter === 'all' || b.examinationStatus === examinationFilter
-            return matchesSearch && matchesFilter
-        })
+        return bookings
+            .filter(b => {
+                const matchesSearch = !searchQuery ||
+                    b.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                    b.customerPhone.includes(searchQuery)
+                const matchesFilter = examinationFilter === 'all' || b.examinationStatus === examinationFilter
+                return matchesSearch && matchesFilter
+            })
+            .sort((a, b) => {
+                const ta = a.appointmentDate ? new Date(a.appointmentDate).getTime() : 0
+                const tb = b.appointmentDate ? new Date(b.appointmentDate).getTime() : 0
+                return ta - tb
+            })
     }, [bookings, searchQuery, examinationFilter])
 
     const examinedCount = useMemo(() => bookings.filter(b => b.examinationStatus === 'done').length, [bookings])
@@ -246,7 +250,7 @@ export default function DoctorAppointments() {
                 </Flex>
             )}
             {getExaminationStatusBadge(booking.examinationStatus)}
-            {isAdmin && (
+            {canManageExamination && (
                 <MenuRoot>
                     <MenuTrigger asChild>
                         <IconButton aria-label="تغيير حالة الكشف" size="xs" variant="ghost" colorPalette="gray">
@@ -492,7 +496,7 @@ export default function DoctorAppointments() {
                     <>
                         {/* موبايل: بطاقات */}
                         <Stack gap={3} display={{ base: 'flex', md: 'none' }} pb={2}>
-                            {filteredBookings.map((booking) => (
+                            {filteredBookings.map((booking, index) => (
                                 <Card.Root
                                     key={booking.id}
                                     bg={getRowBg(booking.examinationStatus)}
@@ -505,6 +509,15 @@ export default function DoctorAppointments() {
                                     <Card.Body p={4}>
                                         <Flex align="flex-start" justify="space-between" gap={3} mb={3}>
                                             <Flex align="center" gap={3} minW={0}>
+                                                <Text
+                                                    fontWeight="bold"
+                                                    fontSize="lg"
+                                                    color="#615b36"
+                                                    minW="28px"
+                                                    flexShrink={0}
+                                                >
+                                                    {index + 1}
+                                                </Text>
                                                 <Avatar.Root size="md" colorPalette={booking.examinationStatus === 'done' ? 'green' : 'blue'} flexShrink={0}>
                                                     <Avatar.Fallback name={booking.customerName} />
                                                 </Avatar.Root>
@@ -553,9 +566,10 @@ export default function DoctorAppointments() {
                             overflow="hidden"
                         >
                             <Box overflowX="auto" css={{ WebkitOverflowScrolling: 'touch' }}>
-                                <Table.Root minW="720px" size="sm">
+                                <Table.Root minW="780px" size="sm">
                                     <Table.Header style={{ backgroundColor: '#fdfbf7' }}>
                                         <Table.Row>
+                                            <Table.ColumnHeader whiteSpace="nowrap" w="56px" style={{ padding: '14px 16px', textAlign: 'right' }}>رقم</Table.ColumnHeader>
                                             <Table.ColumnHeader whiteSpace="nowrap" style={{ padding: '14px 16px', textAlign: 'right' }}>المريض</Table.ColumnHeader>
                                             <Table.ColumnHeader whiteSpace="nowrap" style={{ padding: '14px 16px', textAlign: 'right' }}>وقت الحجز</Table.ColumnHeader>
                                             <Table.ColumnHeader whiteSpace="nowrap" style={{ padding: '14px 16px', textAlign: 'right' }}>نوع الكشف</Table.ColumnHeader>
@@ -564,11 +578,14 @@ export default function DoctorAppointments() {
                                         </Table.Row>
                                     </Table.Header>
                                     <Table.Body>
-                                        {filteredBookings.map((booking) => (
+                                        {filteredBookings.map((booking, index) => (
                                             <Table.Row
                                                 key={booking.id}
                                                 style={{ borderBottom: '1px solid #edf2f7', background: getRowBg(booking.examinationStatus) }}
                                             >
+                                                <Table.Cell style={{ padding: '14px 16px', verticalAlign: 'middle' }}>
+                                                    <Text fontWeight="bold" color="#615b36">{index + 1}</Text>
+                                                </Table.Cell>
                                                 <Table.Cell style={{ padding: '14px 16px', verticalAlign: 'middle' }}>
                                                     <Flex align="center" gap={3}>
                                                         <Avatar.Root size="sm" colorPalette={booking.examinationStatus === 'done' ? 'green' : 'blue'}>

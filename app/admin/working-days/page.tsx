@@ -53,16 +53,87 @@ function formatDateLocal(date: Date) {
   return `${y}-${m}-${d}`;
 }
 
+/** أول ساعة بداية — آخر ساعة نهاية (حصرية؛ 24 = منتصف الليل 12 ص) */
+const WORK_HOUR_MIN = 6;
+const WORK_HOUR_START_MAX = 23;
+const WORK_HOUR_END_MAX = 24;
+
+/** كل الساعات من 6 ص حتى 12 ص (منتصف الليل) */
+const ALL_WORK_HOURS = Array.from(
+  { length: WORK_HOUR_END_MAX - WORK_HOUR_MIN + 1 },
+  (_, i) => WORK_HOUR_MIN + i,
+);
+/** ساعات البداية: 6 ص … 11 م */
+const START_HOURS = ALL_WORK_HOURS.filter(
+  (h) => h >= WORK_HOUR_MIN && h <= WORK_HOUR_START_MAX,
+);
+/** ساعات النهاية: 7 ص … 12 ص */
+const END_HOURS = ALL_WORK_HOURS.filter((h) => h > WORK_HOUR_MIN);
+
+function hourToValue(h: number): string {
+  return `${String(h).padStart(2, "0")}:00`;
+}
+
+function parseStartHour(value: string): number {
+  const raw = Number(String(value).split(":")[0]);
+  if (Number.isNaN(raw)) return 9;
+  const h = raw === 24 ? WORK_HOUR_START_MAX : raw;
+  return Math.min(WORK_HOUR_START_MAX, Math.max(WORK_HOUR_MIN, h));
+}
+
+function parseEndHour(value: string): number {
+  const raw = Number(String(value).split(":")[0]);
+  if (Number.isNaN(raw)) return 17;
+  if (raw === 0 || raw === 24) return WORK_HOUR_END_MAX;
+  return Math.min(WORK_HOUR_END_MAX, Math.max(WORK_HOUR_MIN + 1, raw));
+}
+
+/** @deprecated استخدم parseStartHour — للتوافق مع أي استدعاء قديم */
+function parseHour(value: string): number {
+  return parseStartHour(value);
+}
+
+function slotToHour(slot: string): number {
+  return Number(slot.split(":")[0]);
+}
+
+function normalizeStartTime(value: string): string {
+  return hourToValue(parseStartHour(value));
+}
+
+function normalizeEndTime(value: string): string {
+  return hourToValue(parseEndHour(value));
+}
+
+function formatHourAr(hhmm: string): string {
+  const raw = Number(String(hhmm).split(":")[0]);
+  if (raw === 0 || raw === 24) return "12 ص";
+  const h = raw;
+  const period = h >= 12 ? "م" : "ص";
+  const hour12 = h % 12 === 0 ? 12 : h % 12;
+  return `${hour12} ${period}`;
+}
+
+/** تسمية واضحة مرتبة زمنياً (24 ساعة + ص/م) */
+function formatHourLabel(h: number): string {
+  if (h === WORK_HOUR_END_MAX) return "24:00  12 ص";
+  return `${hourToValue(h).slice(0, 5)}  ${formatHourAr(hourToValue(h))}`;
+}
+
 function genSlots(start: string, end: string): string[] {
   if (!start || !end) return [];
   const slots: string[] = [];
-  let [sh] = start.split(":").map(Number);
-  const [eh] = end.split(":").map(Number);
+  let sh = parseStartHour(start);
+  const eh = parseEndHour(end);
   while (sh < eh) {
-    slots.push(`${String(sh).padStart(2, "0")}:00`);
+    slots.push(hourToValue(sh));
     sh++;
   }
   return slots;
+}
+
+function isValidTimeRange(start: string, end: string): boolean {
+  return parseStartHour(start) < parseEndHour(end);
 }
 
 /** Returns the Saturday of the week containing `date` */
@@ -103,6 +174,92 @@ const emptyForm: WorkingDayFormState = {
   endTime: "17:00",
   isActive: true,
 };
+
+function HourPickerGrid({
+  label,
+  hint,
+  value,
+  hours,
+  onChange,
+  isHourDisabled,
+}: {
+  label: string;
+  hint?: string;
+  value: string;
+  hours: number[];
+  onChange: (value: string) => void;
+  isHourDisabled?: (h: number) => boolean;
+}) {
+  return (
+    <Box flex={1} minW={0}>
+      <Text fontSize="sm" color="gray.600" mb={1} fontWeight="medium">
+        {label}
+      </Text>
+      {hint && (
+        <Text fontSize="xs" color="gray.400" mb={2}>
+          {hint}
+        </Text>
+      )}
+      <Box
+        maxH="200px"
+        overflowY="auto"
+        border="1px solid"
+        borderColor="gray.200"
+        borderRadius="xl"
+        p={2}
+        bg="white"
+        css={{
+          "&::-webkit-scrollbar": { width: "6px" },
+          "&::-webkit-scrollbar-thumb": {
+            background: "#c9b97a",
+            borderRadius: "3px",
+          },
+        }}
+      >
+        <SimpleGrid columns={{ base: 3, sm: 4 }} gap={1.5}>
+          {hours.map((h) => {
+            const hourValue = hourToValue(h);
+            const selected = value === hourValue;
+            const disabled = isHourDisabled?.(h) ?? false;
+            return (
+              <Button
+                key={h}
+                size="sm"
+                variant={selected ? "solid" : "outline"}
+                bg={selected ? "#666139" : "white"}
+                color={selected ? "white" : disabled ? "gray.400" : "#2d3748"}
+                borderColor={selected ? "#666139" : "gray.200"}
+                opacity={disabled ? 0.45 : 1}
+                cursor={disabled ? "not-allowed" : "pointer"}
+                disabled={disabled}
+                onClick={() => !disabled && onChange(hourValue)}
+                borderRadius="lg"
+                fontWeight={selected ? "bold" : "medium"}
+                fontSize="xs"
+                px={1}
+                py={2}
+                h="auto"
+                minH="40px"
+                flexDirection="column"
+                lineHeight="1.3"
+                whiteSpace="nowrap"
+                _hover={
+                  disabled
+                    ? {}
+                    : selected
+                      ? { bg: "#4a452a" }
+                      : { bg: "#f0ebe0", borderColor: "#666139" }
+                }
+              >
+                {formatHourAr(hourValue)}
+              </Button>
+            );
+          })}
+        </SimpleGrid>
+      </Box>
+    </Box>
+  );
+}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function WorkingDaysPage() {
@@ -270,6 +427,24 @@ export default function WorkingDaysPage() {
     year: "numeric",
   });
 
+  const startHour = parseStartHour(form.startTime);
+
+  const timeRangeValid = isValidTimeRange(form.startTime, form.endTime);
+  const previewSlots = timeRangeValid
+    ? genSlots(form.startTime, form.endTime)
+    : [];
+
+  const handleStartHourChange = (newStart: string) => {
+    setForm((f) => {
+      const next = { ...f, startTime: newStart };
+      if (!isValidTimeRange(newStart, f.endTime)) {
+        const endH = Math.min(parseStartHour(newStart) + 1, WORK_HOUR_END_MAX);
+        next.endTime = hourToValue(endH);
+      }
+      return next;
+    });
+  };
+
   // ── Modal helpers ────────────────────────────────────────────────────────
   const openAddModal = (prefillDate?: string) => {
     setEditingDay(null);
@@ -279,10 +454,17 @@ export default function WorkingDaysPage() {
 
   const openEditModal = (day: WorkingDay) => {
     setEditingDay(day);
+    const startTime = normalizeStartTime(day.startTime);
+    let endTime = normalizeEndTime(day.endTime);
+    if (!isValidTimeRange(startTime, endTime)) {
+      endTime = hourToValue(
+        Math.min(parseStartHour(startTime) + 1, WORK_HOUR_END_MAX),
+      );
+    }
     setForm({
       date: day.date,
-      startTime: day.startTime,
-      endTime: day.endTime,
+      startTime,
+      endTime,
       isActive: day.isActive,
     });
     setIsModalOpen(true);
@@ -303,11 +485,13 @@ export default function WorkingDaysPage() {
       });
       return;
     }
-    if (form.startTime >= form.endTime) {
+    const startTime = normalizeStartTime(form.startTime);
+    const endTime = normalizeEndTime(form.endTime);
+    if (!isValidTimeRange(startTime, endTime)) {
       toaster.create({
-        title: "وقت البداية يجب أن يكون قبل وقت النهاية",
+        title: "وقت النهاية يجب أن يكون بعد وقت البداية بساعة على الأقل",
         type: "error",
-        duration: 2000,
+        duration: 2500,
       });
       return;
     }
@@ -325,6 +509,8 @@ export default function WorkingDaysPage() {
       if (editingDay) {
         await api.put(`/admin/working-days/${editingDay.id}`, {
           ...form,
+          startTime,
+          endTime,
           doctorId: selectedDoctorId,
         });
         toaster.create({
@@ -335,8 +521,8 @@ export default function WorkingDaysPage() {
       } else {
         await api.post("/admin/working-days", {
           date: form.date,
-          startTime: form.startTime,
-          endTime: form.endTime,
+          startTime,
+          endTime,
           doctorId: selectedDoctorId,
         });
         toaster.create({
@@ -826,7 +1012,8 @@ export default function WorkingDaysPage() {
                                       lineHeight={1.2}
                                       lineClamp={1}
                                     >
-                                      {workDay.startTime} — {workDay.endTime}
+                                      {formatHourAr(workDay.startTime)} —{" "}
+                                      {formatHourAr(workDay.endTime)}
                                     </Text>
                                   </Flex>
                                 </Box>
@@ -1015,8 +1202,8 @@ export default function WorkingDaysPage() {
               borderRadius={{ base: "xl", md: "2xl" }}
               overflow="hidden"
               boxShadow="2xl"
-              width={{ base: "100%", sm: "90%", md: "480px" }}
-              maxW={{ base: "calc(100vw - 16px)", md: "480px" }}
+              width={{ base: "100%", sm: "95%", md: "560px" }}
+              maxW={{ base: "calc(100vw - 16px)", md: "560px" }}
               maxH="90vh"
               outline="none"
             >
@@ -1134,73 +1321,76 @@ export default function WorkingDaysPage() {
                     </Box>
                   )}
 
-                  {/* Times */}
-                  <Flex gap={3} flexDir={{ base: "column", sm: "row" }}>
-                    <Box flex={1}>
-                      <Text
-                        fontSize="sm"
-                        color="gray.600"
-                        mb={2}
-                        fontWeight="medium"
-                      >
-                        وقت البداية
+                  {/* ساعات العمل — ساعات كاملة فقط */}
+                  <Box
+                    bg="gray.50"
+                    borderRadius="xl"
+                    p={4}
+                    border="1px solid"
+                    borderColor="gray.100"
+                  >
+                    <Flex align="center" gap={2} mb={3}>
+                      <Clock size={16} color="#666139" />
+                      <Text fontSize="sm" fontWeight="bold" color="#666139">
+                        ساعات العمل
                       </Text>
-                      <Input
-                        type="time"
+                    </Flex>
+                    <Text fontSize="xs" color="gray.500" mb={3}>
+                      ساعات كاملة فقط — من {formatHourAr(hourToValue(WORK_HOUR_MIN))}{" "}
+                      إلى 12 ص (منتصف الليل) — مرتبة من الأقدم للأحدث
+                    </Text>
+                    <Flex gap={3} flexDir={{ base: "column", sm: "row" }}>
+                      <HourPickerGrid
+                        label="من الساعة"
+                        hint={`${START_HOURS.length} خيار — بداية استقبال المرضى`}
                         value={form.startTime}
-                        onChange={(e) =>
-                          setForm((f) => ({ ...f, startTime: e.target.value }))
-                        }
-                        bg="gray.50"
-                        borderColor="gray.200"
-                        _focus={{ borderColor: "#666139", bg: "white" }}
-                        step="3600"
+                        hours={START_HOURS}
+                        onChange={handleStartHourChange}
                       />
-                    </Box>
-                    <Box flex={1}>
-                      <Text
-                        fontSize="sm"
-                        color="gray.600"
-                        mb={2}
-                        fontWeight="medium"
-                      >
-                        وقت النهاية
-                      </Text>
-                      <Input
-                        type="time"
+                      <HourPickerGrid
+                        label="حتى الساعة"
+                        hint={`${END_HOURS.length} خيار — الساعات الرمادية قبل البداية غير متاحة`}
                         value={form.endTime}
-                        onChange={(e) =>
-                          setForm((f) => ({ ...f, endTime: e.target.value }))
+                        hours={END_HOURS}
+                        onChange={(endTime) =>
+                          setForm((f) => ({ ...f, endTime }))
                         }
-                        bg="gray.50"
-                        borderColor="gray.200"
-                        _focus={{ borderColor: "#666139", bg: "white" }}
-                        step="3600"
+                        isHourDisabled={(h) => h <= startHour}
                       />
-                    </Box>
-                  </Flex>
+                    </Flex>
+                  </Box>
 
-                  {/* Preview Slots */}
-                  {form.startTime &&
-                    form.endTime &&
-                    form.startTime < form.endTime && (
-                      <Box
-                        bg="green.50"
-                        borderRadius="xl"
-                        p={4}
-                        border="1px solid"
-                        borderColor="gray.100"
-                      >
-                        <Flex align="center" gap={2} mb={3}>
-                          <Clock size={14} color="#666139" />
-                          <Text fontSize="sm" color="#666139" fontWeight="bold">
-                            المواعيد المتوقعة (
-                            {genSlots(form.startTime, form.endTime).length}{" "}
-                            موعد)
-                          </Text>
-                        </Flex>
-                        <Flex gap={2} flexWrap="wrap">
-                          {genSlots(form.startTime, form.endTime).map((s) => (
+                  {/* ملخص سريع */}
+                  <Box
+                    bg={timeRangeValid ? "green.50" : "red.50"}
+                    borderRadius="xl"
+                    p={4}
+                    border="1px solid"
+                    borderColor={timeRangeValid ? "green.100" : "red.200"}
+                  >
+                    {timeRangeValid ? (
+                      <>
+                        <Text
+                          fontSize="md"
+                          fontWeight="bold"
+                          color="#666139"
+                          textAlign="center"
+                          mb={1}
+                        >
+                          من {formatHourAr(form.startTime)} إلى{" "}
+                          {formatHourAr(form.endTime)}
+                        </Text>
+                        <Text
+                          fontSize="sm"
+                          color="gray.600"
+                          textAlign="center"
+                          mb={3}
+                        >
+                          مدة العمل: {previewSlots.length} ساعة —{" "}
+                          {previewSlots.length} موعد متاح
+                        </Text>
+                        <Flex gap={2} flexWrap="wrap" justify="center" dir="ltr">
+                          {previewSlots.map((s) => (
                             <Badge
                               key={s}
                               bg="#666139"
@@ -1209,18 +1399,30 @@ export default function WorkingDaysPage() {
                               px={2}
                               py={1}
                               borderRadius="md"
+                              fontFamily="mono"
+                              fontSize="xs"
                             >
-                              {s}
+                              {formatHourLabel(slotToHour(s))}
                             </Badge>
                           ))}
                         </Flex>
-                        <Text fontSize="xs" color="gray.500" mt={2}>
-                          كل موعد يستوعب حتى 10 حجوزات — إجمالي{" "}
-                          {genSlots(form.startTime, form.endTime).length * 10}{" "}
-                          حجز كحد أقصى
+                        <Text fontSize="xs" color="gray.500" mt={3} textAlign="center">
+                          كل موعد = ساعة واحدة — حتى 10 حجوزات لكل موعد (
+                          {previewSlots.length * 10} حجز كحد أقصى)
                         </Text>
-                      </Box>
+                      </>
+                    ) : (
+                      <Text
+                        fontSize="sm"
+                        color="red.600"
+                        fontWeight="medium"
+                        textAlign="center"
+                      >
+                        وقت النهاية يجب أن يكون بعد وقت البداية — اختر ساعة
+                        إنهاء لاحقة
+                      </Text>
                     )}
+                  </Box>
 
                   {/* isActive (edit only) */}
                   {editingDay && (
@@ -1272,6 +1474,7 @@ export default function WorkingDaysPage() {
                       color="white"
                       _hover={{ bg: "#1b4332" }}
                       loading={isSaving}
+                      disabled={!timeRangeValid}
                       borderRadius="xl"
                       minH={{ base: "44px", md: "auto" }}
                     >

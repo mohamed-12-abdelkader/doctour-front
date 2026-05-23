@@ -21,7 +21,7 @@ import {
     Tabs,
     IconButton,
 } from '@chakra-ui/react'
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, type ReactNode } from 'react'
 import {
     Plus,
     Calendar,
@@ -36,6 +36,7 @@ import {
     RefreshCw,
     Info,
     Stethoscope,
+    ChevronDown,
 } from 'lucide-react'
 import {
     BookingsIncomeResponse,
@@ -149,6 +150,92 @@ function doctorRowLabel(row: BookingIncomeByDoctorRow): string {
     return n || `طبيب #${row.doctorId}`
 }
 
+/** بطاقة قسم دخل — مغلقة افتراضيًا، اضغط الرأس لفتح المحتوى */
+function CollapsibleIncomeSection({
+    open,
+    onOpenChange,
+    icon,
+    title,
+    subtitle,
+    totalText,
+    headerAction,
+    children,
+    mb,
+}: {
+    open: boolean
+    onOpenChange: (open: boolean) => void
+    icon: ReactNode
+    title: string
+    subtitle?: string
+    totalText?: string | null
+    headerAction?: ReactNode
+    children: ReactNode
+    mb?: number | string
+}) {
+    return (
+        <Card.Root bg="white" shadow="md" borderRadius="xl" overflow="hidden" mb={mb}>
+            <Card.Header
+                bg="#fdfbf7"
+                borderBottom={open ? '1px solid' : 'none'}
+                borderColor="gray.100"
+                p={0}
+            >
+                <Flex align="stretch" gap={0} flexWrap="wrap">
+                    <Button
+                        variant="ghost"
+                        flex={1}
+                        minW={0}
+                        w="100%"
+                        h="auto"
+                        py={4}
+                        px={5}
+                        borderRadius="0"
+                        fontWeight="normal"
+                        justifyContent="flex-start"
+                        onClick={() => onOpenChange(!open)}
+                        aria-expanded={open}
+                        _hover={{ bg: '#f5f2eb' }}
+                    >
+                        <Flex justify="space-between" align="start" gap={3} width="100%">
+                            <Box flex={1} minW={0}>
+                                <Heading size="md" color="#615b36" display="flex" alignItems="center" gap={2}>
+                                    {icon}
+                                    {title}
+                                </Heading>
+                                {subtitle && (
+                                    <Text fontSize="sm" color="gray.500" mt={1} fontWeight="normal">
+                                        {subtitle}
+                                    </Text>
+                                )}
+                                {totalText && (
+                                    <Text fontSize="sm" fontWeight="bold" color="#615b36" mt={2}>
+                                        {totalText}
+                                    </Text>
+                                )}
+                                <Text fontSize="xs" color="gray.400" mt={2}>
+                                    {open ? '▲ اضغط لإخفاء التفاصيل' : '▼ اضغط لفتح التفاصيل'}
+                                </Text>
+                            </Box>
+                            <Box
+                                color="#615b36"
+                                flexShrink={0}
+                                mt={1}
+                                transform={open ? 'rotate(180deg)' : undefined}
+                                transition="transform 0.2s"
+                                aria-hidden
+                            >
+                                <ChevronDown size={22} />
+                            </Box>
+                        </Flex>
+                    </Button>
+                    {headerAction}
+                </Flex>
+            </Card.Header>
+            {open ? <Card.Body p={5}>{children}</Card.Body> : null}
+        </Card.Root>
+    )
+}
+
 type PeriodMode = 'month' | 'days' | 'months'
 
 export default function MonthlyAccountsPage() {
@@ -176,6 +263,9 @@ export default function MonthlyAccountsPage() {
 
     const [filterProcedure, setFilterProcedure] = useState<string>('all')
     const [filterExpenseCat, setFilterExpenseCat] = useState<string>('all')
+    const [bookingsByDoctorOpen, setBookingsByDoctorOpen] = useState(false)
+    const [bookingsSectionOpen, setBookingsSectionOpen] = useState(false)
+    const [manualIncomeSectionOpen, setManualIncomeSectionOpen] = useState(false)
 
     const filteredBookingsIncome = useMemo(() => {
         if (!bookingsIncome?.byCustomer) return []
@@ -757,17 +847,15 @@ export default function MonthlyAccountsPage() {
                         )}
 
                         {summary && summary.incomeFromBookingsByDoctor && summary.incomeFromBookingsByDoctor.length > 0 && (
-                            <Card.Root bg="white" shadow="md" borderRadius="xl" overflow="hidden" mb={8}>
-                                <Card.Header bg="#fdfbf7" borderBottom="1px solid" borderColor="gray.100" py={4} px={5}>
-                                    <Heading size="md" color="#615b36" display="flex" alignItems="center" gap={2}>
-                                        <Stethoscope size={20} />
-                                        توزيع دخل الحجوزات حسب الطبيب (ملخص العيادة)
-                                    </Heading>
-                                    <Text fontSize="sm" color="gray.500" mt={1} fontWeight="normal">
-                                        الدخل اليدوي والمصروفات تظهر في الملخص أعلاه على مستوى العيادة فقط — هذا الجدول يخص حجوزات الفترة فقط.
-                                    </Text>
-                                </Card.Header>
-                                <Card.Body p={5}>
+                            <CollapsibleIncomeSection
+                                open={bookingsByDoctorOpen}
+                                onOpenChange={setBookingsByDoctorOpen}
+                                icon={<Stethoscope size={20} />}
+                                title="توزيع دخل الحجوزات حسب الطبيب (ملخص العيادة)"
+                                subtitle="الدخل اليدوي والمصروفات تظهر في الملخص أعلاه على مستوى العيادة فقط — هذا الجدول يخص حجوزات الفترة فقط."
+                                totalText={`الإجمالي: ${formatAmount(summary.incomeFromBookings)} EGP`}
+                                mb={8}
+                            >
                                     <Box overflowX="auto">
                                         <Table.Root size="sm">
                                             <Table.Header bg="gray.50">
@@ -792,23 +880,23 @@ export default function MonthlyAccountsPage() {
                                         <Text fontWeight="bold" color="gray.700">إجمالي دخل الحجوزات</Text>
                                         <Text fontWeight="bold" fontSize="lg" color="#615b36">{formatAmount(summary.incomeFromBookings)} EGP</Text>
                                     </Flex>
-                                </Card.Body>
-                            </Card.Root>
+                            </CollapsibleIncomeSection>
                         )}
 
                         <SimpleGrid columns={{ base: 1, lg: 2 }} gap={8}>
                             {/* دخل الحجوزات — حسب الطبيب + حسب العميل */}
-                            <Card.Root bg="white" shadow="md" borderRadius="xl" overflow="hidden">
-                                <Card.Header bg="#fdfbf7" borderBottom="1px solid" borderColor="gray.100" py={4} px={5}>
-                                    <Heading size="md" color="#615b36" display="flex" alignItems="center" gap={2}>
-                                        <Receipt size={20} />
-                                        دخل الحجوزات
-                                    </Heading>
-                                    <Text fontSize="sm" color="gray.500" mt={1} fontWeight="normal">
-                                        تفصيل API: حسب الطبيب ثم حسب العميل.
-                                    </Text>
-                                </Card.Header>
-                                <Card.Body p={5}>
+                            <CollapsibleIncomeSection
+                                open={bookingsSectionOpen}
+                                onOpenChange={setBookingsSectionOpen}
+                                icon={<Receipt size={20} />}
+                                title="دخل الحجوزات"
+                                subtitle="تفصيل API: حسب الطبيب ثم حسب العميل."
+                                totalText={
+                                    bookingsIncome?.total != null
+                                        ? `الإجمالي: ${formatAmount(bookingsIncome.total)} EGP`
+                                        : null
+                                }
+                            >
                                     {bookingsIncome &&
                                     ((bookingsIncome.byDoctor && bookingsIncome.byDoctor.length > 0) ||
                                         (bookingsIncome.byCustomer && bookingsIncome.byCustomer.length > 0)) ? (
@@ -924,26 +1012,40 @@ export default function MonthlyAccountsPage() {
                                             <Text color="gray.500" fontSize="sm">لا يوجد دخل حجوزات للفترة المحددة</Text>
                                         </Box>
                                     )}
-                                </Card.Body>
-                            </Card.Root>
+                            </CollapsibleIncomeSection>
 
                             {/* الدخل اليدوي */}
-                            <Card.Root bg="white" shadow="md" borderRadius="xl" overflow="hidden">
-                                <Card.Header bg="#fdfbf7" borderBottom="1px solid" borderColor="gray.100" py={4} px={5}>
-                                    <Flex justify="space-between" align="center" flexWrap="wrap" gap={2}>
-                                        <Heading size="md" color="#615b36" display="flex" alignItems="center" gap={2}>
-                                            <DollarSign size={20} />
-                                            الدخل اليدوي
-                                        </Heading>
-                                        <Button size="sm" bg="#615b36" color="white" _hover={{ bg: '#4a452a' }} onClick={onIncomeOpen}>
-                                            <HStack gap={1} as="span">
-                                                <Plus size={16} />
-                                                <span>إضافة دخل</span>
-                                            </HStack>
-                                        </Button>
-                                    </Flex>
-                                </Card.Header>
-                                <Card.Body p={5}>
+                            <CollapsibleIncomeSection
+                                open={manualIncomeSectionOpen}
+                                onOpenChange={setManualIncomeSectionOpen}
+                                icon={<DollarSign size={20} />}
+                                title="الدخل اليدوي"
+                                totalText={
+                                    manualIncome?.total != null
+                                        ? `الإجمالي: ${formatAmount(manualIncome.total)} EGP`
+                                        : null
+                                }
+                                headerAction={
+                                    <Button
+                                        size="sm"
+                                        bg="#615b36"
+                                        color="white"
+                                        _hover={{ bg: '#4a452a' }}
+                                        flexShrink={0}
+                                        mx={4}
+                                        my={3}
+                                        onClick={(e) => {
+                                            e.stopPropagation()
+                                            onIncomeOpen()
+                                        }}
+                                    >
+                                        <HStack gap={1} as="span">
+                                            <Plus size={16} />
+                                            <span>إضافة دخل</span>
+                                        </HStack>
+                                    </Button>
+                                }
+                            >
                                     {manualIncome && manualIncome.entries?.length > 0 ? (
                                         <>
                                             <Box overflowX="auto" mb={4}>
@@ -980,8 +1082,7 @@ export default function MonthlyAccountsPage() {
                                             </Button>
                                         </Box>
                                     )}
-                                </Card.Body>
-                            </Card.Root>
+                            </CollapsibleIncomeSection>
 
                             {/* أنواع وتصنيفات المصروفات — منفصلة عن مودال إضافة المصروف */}
                             <Card.Root

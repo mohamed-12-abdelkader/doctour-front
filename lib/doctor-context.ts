@@ -44,3 +44,8 @@ export function setSelectedDoctorId(doctorId: number | null) {
 export function canChooseDoctor(role: BasicRole | null) {
   return role === "admin" || role === "secretary" || role === "staff";
 }
+
+/** تغيير حالة الكشف (انتظار / تم الكشف) — أدمن أو سكرتير */
+export function canChangeExaminationStatus(role: BasicRole | null) {
+  return role === "admin" || role === "secretary" || role === "staff";
+}

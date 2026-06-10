@@ -156,15 +156,27 @@ type FormErrors = Partial<
   Record<
     | "name"
     | "phone"
+    | "age"
     | "doctorId"
     | "date"
     | "time"
     | "amountPaid"
     | "paymentMethod"
+    | "transferFromPhone"
     | "visitType",
     string
   >
 >;
+
+type PaymentRow = {
+  method: ClinicPaymentMethod;
+  amount: string;
+  transferFromPhone?: string;
+};
+
+function needsTransferFromPhone(method: ClinicPaymentMethod): boolean {
+  return method === "vodafone_cash" || method === "instapay";
+}
 
 function mergeKnownCustomerHints(
   a: KnownCustomerHint[],
@@ -208,11 +220,15 @@ export default function BookingModal({
 }: BookingModalProps) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  const [age, setAge] = useState("");
   const [time, setTime] = useState("");
   const [date, setDate] = useState("");
   const [noTime, setNoTime] = useState(false);
   const [amountPaid, setAmountPaid] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<ClinicPaymentMethod>("cash");
+  const [paymentRows, setPaymentRows] = useState<PaymentRow[]>([
+    { method: "cash", amount: "" },
+  ]);
   const [selectedVisitTypes, setSelectedVisitTypes] = useState<string[]>([
     BOOKING_SERVICES[0] ?? "كشف",
   ]);
@@ -286,6 +302,12 @@ export default function BookingModal({
   const showSuggestionList =
     !initialData && nameFocused && nameSuggestions.length > 0;
 
+  const totalPaymentAmount = useMemo(
+    () =>
+      paymentRows.reduce((sum, row) => sum + (parseAmountPaid(row.amount) ?? 0), 0),
+    [paymentRows],
+  );
+
   const toggleVisitType = (service: string) => {
     const label = parseApiVisitTypeToUi(service);
     setSelectedVisitTypes((prev) => {
@@ -346,6 +368,11 @@ export default function BookingModal({
       if (initialData) {
         setName(initialData.customerName || "");
         setPhone(initialData.customerPhone || "");
+        setAge(
+          initialData.age != null && Number.isFinite(Number(initialData.age))
+            ? String(initialData.age)
+            : "",
+        );
         setSelectedVisitTypes(parseVisitTypesFromInitial(initialData.visitType));
 
         const amountRaw =
@@ -356,6 +383,62 @@ export default function BookingModal({
         setPaymentMethod(
           normalizePaymentMethod((initialData as { paymentMethod?: string }).paymentMethod),
         );
+        const existingPayments =
+          (initialData as { paymentDetails?: unknown }).paymentDetails ??
+          (initialData as { payments?: unknown }).payments;
+        if (Array.isArray(existingPayments) && existingPayments.length > 0) {
+          const rows = existingPayments
+            .map((p) => {
+              const row = p as {
+                method?: string;
+                amount?: unknown;
+                transferFromPhone?: unknown;
+              };
+              const amount = sanitizeAmountInput(String(row.amount ?? ""));
+              if (!amount) return null;
+              return {
+                method: normalizePaymentMethod(row.method),
+                amount,
+                transferFromPhone:
+                  typeof row.transferFromPhone === "string"
+                    ? row.transferFromPhone
+                    : "",
+              };
+            })
+            .filter(Boolean) as PaymentRow[];
+          setPaymentRows(
+            rows.length > 0
+              ? rows
+              : [
+                  {
+                    method: normalizePaymentMethod(
+                      (initialData as { paymentMethod?: string }).paymentMethod,
+                    ),
+                    amount: sanitizeAmountInput(amountRaw) || "0",
+                    transferFromPhone:
+                      typeof (initialData as { transferFromPhone?: unknown })
+                        .transferFromPhone === "string"
+                        ? (initialData as { transferFromPhone: string })
+                            .transferFromPhone
+                        : "",
+                  },
+                ],
+          );
+        } else {
+          setPaymentRows([
+            {
+              method: normalizePaymentMethod(
+                (initialData as { paymentMethod?: string }).paymentMethod,
+              ),
+              amount: sanitizeAmountInput(amountRaw) || "0",
+              transferFromPhone:
+                typeof (initialData as { transferFromPhone?: unknown })
+                  .transferFromPhone === "string"
+                  ? (initialData as { transferFromPhone: string }).transferFromPhone
+                  : "",
+            },
+          ]);
+        }
         setSelectedDoctorId(
           Number((initialData as any).doctorId ?? doctorId ?? 0),
         );
@@ -380,11 +463,13 @@ export default function BookingModal({
         // Reset for new entry
         setName("");
         setPhone("");
+        setAge("");
         setDate(defaultDate || formatDateLocal(new Date()));
         setTime("");
         setNoTime(defaultNoTime);
         setAmountPaid("");
         setPaymentMethod("cash");
+        setPaymentRows([{ method: "cash", amount: "" }]);
         setSelectedVisitTypes([BOOKING_SERVICES[0] ?? "كشف"]);
         setAvailableSlots([]);
         const preferred =
@@ -519,29 +604,60 @@ export default function BookingModal({
     const phoneErr = validateEgyptPhone(phone);
     if (phoneErr) errors.phone = phoneErr;
 
-    if (!selectedDoctorId) errors.doctorId = "يرجى اختيار الطبيب";
-
-    if (!date) {
-      errors.date = "يرجى اختيار تاريخ الحجز";
-    } else if (isNewBooking) {
-      const today = formatDateLocal(new Date());
-      if (date < today) errors.date = "لا يمكن اختيار تاريخ في الماضي";
-    }
-
-    if (!noTime) {
-      if (!time) {
-        errors.time = "يرجى اختيار وقت من المواعيد المتاحة";
-      } else if (
-        availableSlots.length > 0 &&
-        !availableSlots.includes(time)
-      ) {
-        errors.time = "الوقت المختار غير متاح — اختر من القائمة";
+    if (age.trim()) {
+      const parsedAge = Number(age);
+      if (!Number.isInteger(parsedAge) || parsedAge <= 0 || parsedAge > 130) {
+        errors.age = "أدخل سن صحيح";
       }
     }
 
-    const amount = parseAmountPaid(amountPaid);
-    if (amount === null) {
-      errors.amountPaid = "أدخل مبلغًا صحيحًا (مثل: 100 أو 150)";
+    if (isNewBooking) {
+      if (!selectedDoctorId) errors.doctorId = "يرجى اختيار الطبيب";
+
+      if (!date) {
+        errors.date = "يرجى اختيار تاريخ الحجز";
+      } else {
+        const today = formatDateLocal(new Date());
+        if (date < today) errors.date = "لا يمكن اختيار تاريخ في الماضي";
+      }
+
+      if (!noTime) {
+        if (!time) {
+          errors.time = "يرجى اختيار وقت من المواعيد المتاحة";
+        } else if (
+          availableSlots.length > 0 &&
+          !availableSlots.includes(time)
+        ) {
+          errors.time = "الوقت المختار غير متاح — اختر من القائمة";
+        }
+      }
+    }
+
+    const paymentMethods = new Set<ClinicPaymentMethod>();
+    for (const row of paymentRows) {
+      const amount = parseAmountPaid(row.amount);
+      if (amount === null || amount <= 0) {
+        errors.amountPaid = "أدخل مبلغًا صحيحًا لكل طريقة دفع";
+        break;
+      }
+      if (paymentMethods.has(row.method)) {
+        errors.paymentMethod = "لا تكرر نفس طريقة الدفع أكثر من مرة";
+        break;
+      }
+      if (needsTransferFromPhone(row.method)) {
+        const transferErr = validateEgyptPhone(row.transferFromPhone ?? "");
+        if (transferErr) {
+          errors.transferFromPhone = `أدخل رقم التحويل الصحيح لطريقة ${
+            CLINIC_PAYMENT_OPTIONS.find((opt) => opt.value === row.method)
+              ?.label ?? "الدفع"
+          }`;
+          break;
+        }
+      }
+      paymentMethods.add(row.method);
+    }
+    if (paymentRows.length === 0 || totalPaymentAmount <= 0) {
+      errors.amountPaid = "أدخل مبلغًا واحدًا على الأقل";
     }
 
     if (selectedVisitTypes.length === 0) {
@@ -552,30 +668,51 @@ export default function BookingModal({
       errors.visitType = "اختر أنواع الحجز من القائمة فقط";
     }
 
-    if (!paymentMethod) {
-      errors.paymentMethod = "اختر طريقة الدفع";
-    }
-
     return errors;
   }, [
     name,
     phone,
+    age,
     selectedDoctorId,
     date,
     time,
     noTime,
-    amountPaid,
-    paymentMethod,
+    paymentRows,
+    totalPaymentAmount,
     selectedVisitTypes,
     availableSlots,
     isNewBooking,
   ]);
 
-  const handleAmountChange = (raw: string) => {
-    setAmountPaid(sanitizeAmountInput(raw));
+  const updatePaymentRow = (
+    index: number,
+    patch: Partial<PaymentRow>,
+  ) => {
+    setPaymentRows((prev) =>
+      prev.map((row, i) => (i === index ? { ...row, ...patch } : row)),
+    );
     setFormErrors((prev) => {
       const next = { ...prev };
       delete next.amountPaid;
+      delete next.paymentMethod;
+      delete next.transferFromPhone;
+      return next;
+    });
+  };
+
+  const togglePaymentMethod = (method: ClinicPaymentMethod) => {
+    setPaymentRows((prev) => {
+      if (prev.some((row) => row.method === method)) {
+        if (prev.length <= 1) return prev;
+        return prev.filter((row) => row.method !== method);
+      }
+      return [...prev, { method, amount: "", transferFromPhone: "" }];
+    });
+    setFormErrors((prev) => {
+      const next = { ...prev };
+      delete next.amountPaid;
+      delete next.paymentMethod;
+      delete next.transferFromPhone;
       return next;
     });
   };
@@ -596,22 +733,47 @@ export default function BookingModal({
       return;
     }
 
-    const amount = parseAmountPaid(amountPaid)!;
+    const payments = paymentRows
+      .map((row) => {
+        const transferFromPhone = (row.transferFromPhone ?? "").replace(/\D/g, "");
+        return {
+          method: row.method,
+          amount: parseAmountPaid(row.amount) ?? 0,
+          ...(needsTransferFromPhone(row.method) && transferFromPhone
+            ? { transferFromPhone }
+            : {}),
+        };
+      })
+      .filter((row) => row.amount > 0);
+    const amount = payments.reduce((sum, row) => sum + row.amount, 0);
+    const parsedAge = age.trim() ? Number(age) : null;
     const visitTypesForApi = selectedVisitTypes.map(mapVisitTypeForApi);
+    const singlePayment = payments.length === 1 ? payments[0] : null;
     const bookingData: Record<string, unknown> = {
       name: name.trim(),
       phone: phone.replace(/\D/g, ""),
-      date,
-      doctorId: selectedDoctorId,
       amountPaid: amount,
-      paymentMethod,
+      paymentMethod: singlePayment?.method ?? payments[0]?.method ?? paymentMethod,
       procedureTypes: visitTypesForApi,
       visitTypes: visitTypesForApi,
     };
-    if (noTime) {
-      bookingData.noTime = true;
-    } else {
-      bookingData.time = time;
+    if (singlePayment?.transferFromPhone) {
+      bookingData.transferFromPhone = singlePayment.transferFromPhone;
+    }
+    if (payments.length > 1) {
+      bookingData.payments = payments;
+    }
+    if (parsedAge != null && Number.isFinite(parsedAge)) {
+      bookingData.age = parsedAge;
+    }
+    if (isNewBooking) {
+      bookingData.date = date;
+      bookingData.doctorId = selectedDoctorId;
+      if (noTime) {
+        bookingData.noTime = true;
+      } else {
+        bookingData.time = time;
+      }
     }
     if (initialData) {
       bookingData.visitType =
@@ -726,7 +888,7 @@ export default function BookingModal({
               bg="gray.50"
             >
               <VStack gap={{ base: 4, md: 5 }} align="stretch">
-                <SimpleGrid columns={{ base: 1, md: 2 }} gap={{ base: 4, md: 5 }}>
+                <SimpleGrid columns={{ base: 1, md: 3 }} gap={{ base: 4, md: 5 }}>
                 <Field.Root invalid={!!formErrors.name} position="relative">
                   <Field.Label fontSize="sm" color="gray.700" display="flex" alignItems="center" gap={2}>
                     <User size={16} color="#615b36" />
@@ -841,44 +1003,67 @@ export default function BookingModal({
                   />
                   {formErrors.phone && <Field.ErrorText>{formErrors.phone}</Field.ErrorText>}
                 </Field.Root>
-                </SimpleGrid>
 
-                <Field.Root invalid={!!formErrors.doctorId}>
-                  <Field.Label fontSize="sm" color="gray.700" display="flex" alignItems="center" gap={2}>
-                    <Stethoscope size={16} color="#615b36" />
-                    الطبيب
+                <Field.Root invalid={!!formErrors.age}>
+                  <Field.Label fontSize="sm" color="gray.700">
+                    السن (اختياري)
                   </Field.Label>
-                  <select
-                    value={selectedDoctorId}
+                  <Input
+                    placeholder="اختياري - مثال: 30"
+                    value={age}
                     onChange={(e) => {
-                      setSelectedDoctorId(Number(e.target.value) || 0);
-                      setTime("");
-                      setAvailableSlots([]);
+                      setAge(e.target.value.replace(/\D/g, ""));
                       setFormErrors((prev) => {
                         const next = { ...prev };
-                        delete next.doctorId;
-                        delete next.time;
+                        delete next.age;
                         return next;
                       });
                     }}
-                    style={selectStyle(!!formErrors.doctorId)}
-                  >
-                    <option value={0}>اختر الطبيب</option>
-                    {doctors.map((doc) => (
-                      <option key={doc.id} value={doc.id}>
-                        {doc.user?.name || doc.name || `Doctor #${doc.id}`}
-                      </option>
-                    ))}
-                  </select>
-                  {formErrors.doctorId && <Field.ErrorText>{formErrors.doctorId}</Field.ErrorText>}
+                    inputMode="numeric"
+                    {...inputStyles}
+                    borderColor={formErrors.age ? "red.300" : "gray.200"}
+                  />
+                  {formErrors.age && <Field.ErrorText>{formErrors.age}</Field.ErrorText>}
                 </Field.Root>
+                </SimpleGrid>
 
-                <Field.Root invalid={!!(formErrors.date || formErrors.time)}>
-                  <Field.Label fontSize="sm" color="gray.700" display="flex" alignItems="center" gap={2}>
-                    <Clock size={16} color="#615b36" />
-                    تاريخ ووقت الحجز
-                  </Field.Label>
-                  {isNewBooking && (
+                {isNewBooking ? (
+                  <>
+                    <Field.Root invalid={!!formErrors.doctorId}>
+                      <Field.Label fontSize="sm" color="gray.700" display="flex" alignItems="center" gap={2}>
+                        <Stethoscope size={16} color="#615b36" />
+                        الطبيب
+                      </Field.Label>
+                      <select
+                        value={selectedDoctorId}
+                        onChange={(e) => {
+                          setSelectedDoctorId(Number(e.target.value) || 0);
+                          setTime("");
+                          setAvailableSlots([]);
+                          setFormErrors((prev) => {
+                            const next = { ...prev };
+                            delete next.doctorId;
+                            delete next.time;
+                            return next;
+                          });
+                        }}
+                        style={selectStyle(!!formErrors.doctorId)}
+                      >
+                        <option value={0}>اختر الطبيب</option>
+                        {doctors.map((doc) => (
+                          <option key={doc.id} value={doc.id}>
+                            {doc.user?.name || doc.name || `Doctor #${doc.id}`}
+                          </option>
+                        ))}
+                      </select>
+                      {formErrors.doctorId && <Field.ErrorText>{formErrors.doctorId}</Field.ErrorText>}
+                    </Field.Root>
+
+                    <Field.Root invalid={!!(formErrors.date || formErrors.time)}>
+                      <Field.Label fontSize="sm" color="gray.700" display="flex" alignItems="center" gap={2}>
+                        <Clock size={16} color="#615b36" />
+                        تاريخ ووقت الحجز
+                      </Field.Label>
                     <Flex
                       align="center"
                       justify="space-between"
@@ -917,137 +1102,225 @@ export default function BookingModal({
                         </Switch.Control>
                       </Switch.Root>
                     </Flex>
-                  )}
-                  <SimpleGrid columns={{ base: 1, sm: 2 }} gap={3}>
-                    <Input
-                      type="date"
-                      value={date}
-                      min={formatDateLocal(new Date())}
-                      onChange={(e) => {
-                        setDate(e.target.value);
-                        if (!noTime) setTime("");
-                        setFormErrors((prev) => {
-                          const next = { ...prev };
-                          delete next.date;
-                          if (!noTime) delete next.time;
-                          return next;
-                        });
-                      }}
-                      {...inputStyles}
-                      borderColor={formErrors.date ? "red.300" : "gray.200"}
-                    />
-                    {noTime ? (
-                      <Box
-                        display="flex"
+                      <SimpleGrid columns={{ base: 1, sm: 2 }} gap={3}>
+                        <Input
+                          type="date"
+                          value={date}
+                          min={formatDateLocal(new Date())}
+                          onChange={(e) => {
+                            setDate(e.target.value);
+                            if (!noTime) setTime("");
+                            setFormErrors((prev) => {
+                              const next = { ...prev };
+                              delete next.date;
+                              if (!noTime) delete next.time;
+                              return next;
+                            });
+                          }}
+                          {...inputStyles}
+                          borderColor={formErrors.date ? "red.300" : "gray.200"}
+                        />
+                        {noTime ? (
+                          <Box
+                            display="flex"
+                            alignItems="center"
+                            justifyContent="center"
+                            fontSize="sm"
+                            color="orange.700"
+                            fontWeight="medium"
+                            bg="orange.50"
+                            borderRadius="md"
+                            border="1px dashed"
+                            borderColor="orange.200"
+                            minH="48px"
+                            px={3}
+                            textAlign="center"
+                          >
+                            بدون وقت — لليوم فقط
+                          </Box>
+                        ) : isLoadingSlots ? (
+                          <Box
+                            display="flex"
+                            alignItems="center"
+                            justifyContent="center"
+                            fontSize="sm"
+                            color="gray.500"
+                            bg="gray.50"
+                            borderRadius="md"
+                            border="1px solid"
+                            borderColor="gray.200"
+                            minH="48px"
+                          >
+                            جاري جلب المواعيد...
+                          </Box>
+                        ) : (
+                          <select
+                            value={time}
+                            onChange={(e) => {
+                              setTime(e.target.value);
+                              setFormErrors((prev) => {
+                                const next = { ...prev };
+                                delete next.time;
+                                return next;
+                              });
+                            }}
+                            style={selectStyle(!!formErrors.time)}
+                          >
+                            <option value="">
+                              {availableSlots.length > 0
+                                ? "اختر الوقت"
+                                : "لا توجد مواعيد متاحة"}
+                            </option>
+                            {availableSlots.map((slot) => (
+                              <option key={slot} value={slot}>
+                                {formatSlotTo12Hour(slot)}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </SimpleGrid>
+                      {formErrors.date && <Field.ErrorText>{formErrors.date}</Field.ErrorText>}
+                      {formErrors.time && <Field.ErrorText>{formErrors.time}</Field.ErrorText>}
+                    </Field.Root>
+                  </>
+                ) : (
+                  <Box
+                    p={3}
+                    bg="blue.50"
+                    border="1px solid"
+                    borderColor="blue.100"
+                    borderRadius="lg"
+                  >
+                    <Text fontSize="sm" color="blue.800" fontWeight="medium">
+                      تعديل الحجز لا يغير الطبيب أو تاريخ/وقت الموعد.
+                    </Text>
+                  </Box>
+                )}
+
+                <Field.Root
+                  invalid={
+                    !!(
+                      formErrors.amountPaid ||
+                      formErrors.paymentMethod ||
+                      formErrors.transferFromPhone
+                    )
+                  }
+                >
+                  <Field.Label fontSize="sm" color="gray.700" display="flex" alignItems="center" gap={2} mb={2}>
+                    <CreditCard size={16} color="#615b36" />
+                    اختر طرق الدفع والمبلغ لكل طريقة
+                  </Field.Label>
+                  <SimpleGrid columns={{ base: 2, md: 4 }} gap={2} mb={3}>
+                    {CLINIC_PAYMENT_OPTIONS.map((opt) => {
+                      const selected = paymentRows.some((row) => row.method === opt.value);
+                      return (
+                        <Button
+                          key={opt.value}
+                          type="button"
+                          size="sm"
+                          variant={selected ? "solid" : "outline"}
+                          bg={selected ? "#615b36" : "white"}
+                          color={selected ? "white" : "gray.700"}
+                          borderColor={selected ? "#615b36" : "gray.300"}
+                          _hover={{ bg: selected ? "#4a452a" : "gray.50" }}
+                          onClick={() => togglePaymentMethod(opt.value)}
+                        >
+                          {opt.label}
+                        </Button>
+                      );
+                    })}
+                  </SimpleGrid>
+                  <VStack align="stretch" gap={2}>
+                    {paymentRows.map((row, index) => (
+                      <SimpleGrid
+                        key={`${row.method}-${index}`}
+                        columns={{ base: 1, md: 12 }}
+                        gap={2}
                         alignItems="center"
-                        justifyContent="center"
-                        fontSize="sm"
-                        color="orange.700"
-                        fontWeight="medium"
-                        bg="orange.50"
-                        borderRadius="md"
-                        border="1px dashed"
-                        borderColor="orange.200"
-                        minH="48px"
-                        px={3}
-                        textAlign="center"
-                      >
-                        بدون وقت — لليوم فقط
-                      </Box>
-                    ) : isLoadingSlots ? (
-                      <Box
-                        display="flex"
-                        alignItems="center"
-                        justifyContent="center"
-                        fontSize="sm"
-                        color="gray.500"
-                        bg="gray.50"
-                        borderRadius="md"
+                        bg="white"
                         border="1px solid"
                         borderColor="gray.200"
-                        minH="48px"
+                        borderRadius="xl"
+                        p={3}
                       >
-                        جاري جلب المواعيد...
-                      </Box>
-                    ) : (
-                      <select
-                        value={time}
-                        onChange={(e) => {
-                          setTime(e.target.value);
-                          setFormErrors((prev) => {
-                            const next = { ...prev };
-                            delete next.time;
-                            return next;
-                          });
-                        }}
-                        style={selectStyle(!!formErrors.time)}
-                      >
-                        <option value="">
-                          {availableSlots.length > 0
-                            ? "اختر الوقت"
-                            : "لا توجد مواعيد متاحة"}
-                        </option>
-                        {availableSlots.map((slot) => (
-                          <option key={slot} value={slot}>
-                            {formatSlotTo12Hour(slot)}
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                  </SimpleGrid>
-                  {formErrors.date && <Field.ErrorText>{formErrors.date}</Field.ErrorText>}
-                  {formErrors.time && <Field.ErrorText>{formErrors.time}</Field.ErrorText>}
+                        <Box gridColumn={{ base: "auto", md: "span 4" }}>
+                          <Text fontWeight="bold" color="#615b36" fontSize="sm">
+                            {CLINIC_PAYMENT_OPTIONS.find((opt) => opt.value === row.method)?.label}
+                          </Text>
+                          {needsTransferFromPhone(row.method) && (
+                            <Text fontSize="xs" color="gray.500" mt={1}>
+                              يتطلب رقم المحوّل منه
+                            </Text>
+                          )}
+                        </Box>
+                        <Box
+                          gridColumn={{
+                            base: "auto",
+                            md: needsTransferFromPhone(row.method) ? "span 3" : "span 6",
+                          }}
+                        >
+                          <Input
+                            type="text"
+                            inputMode="numeric"
+                            placeholder={`مبلغ ${CLINIC_PAYMENT_OPTIONS.find((opt) => opt.value === row.method)?.label ?? ""}`}
+                            value={row.amount}
+                            onChange={(e) =>
+                              updatePaymentRow(index, {
+                                amount: sanitizeAmountInput(e.target.value),
+                              })
+                            }
+                            {...inputStyles}
+                            borderColor={formErrors.amountPaid ? "red.300" : "gray.200"}
+                          />
+                        </Box>
+                        {needsTransferFromPhone(row.method) && (
+                          <Box gridColumn={{ base: "auto", md: "span 3" }}>
+                            <Input
+                              type="text"
+                              inputMode="tel"
+                              placeholder="رقم المحوّل منه"
+                              value={row.transferFromPhone ?? ""}
+                              onChange={(e) =>
+                                updatePaymentRow(index, {
+                                  transferFromPhone: e.target.value.replace(/\D/g, ""),
+                                })
+                              }
+                              dir="ltr"
+                              textAlign="left"
+                              {...inputStyles}
+                              borderColor={
+                                formErrors.transferFromPhone ? "red.300" : "gray.200"
+                              }
+                            />
+                          </Box>
+                        )}
+                        <Button
+                          type="button"
+                          gridColumn={{ base: "auto", md: "span 2" }}
+                          variant="ghost"
+                          colorPalette="red"
+                          disabled={paymentRows.length <= 1}
+                          onClick={() => togglePaymentMethod(row.method)}
+                        >
+                          إزالة
+                        </Button>
+                      </SimpleGrid>
+                    ))}
+                  </VStack>
+                  <Flex justify="space-between" mt={2} gap={3} flexWrap="wrap">
+                    <Text fontSize="xs" color="gray.500">
+                      يمكنك اختيار أكثر من طريقة دفع وتحديد مبلغ لكل طريقة.
+                    </Text>
+                    <Text fontSize="sm" fontWeight="bold" color="#615b36">
+                      الإجمالي: {totalPaymentAmount} EGP
+                    </Text>
+                  </Flex>
+                  {formErrors.amountPaid && <Field.ErrorText>{formErrors.amountPaid}</Field.ErrorText>}
+                  {formErrors.paymentMethod && <Field.ErrorText>{formErrors.paymentMethod}</Field.ErrorText>}
+                  {formErrors.transferFromPhone && (
+                    <Field.ErrorText>{formErrors.transferFromPhone}</Field.ErrorText>
+                  )}
                 </Field.Root>
-
-                <SimpleGrid columns={{ base: 1, md: 2 }} gap={{ base: 4, md: 5 }}>
-                  <Field.Root invalid={!!formErrors.amountPaid}>
-                    <Field.Label fontSize="sm" color="gray.700" display="flex" alignItems="center" gap={2}>
-                      <Banknote size={16} color="#615b36" />
-                      المبلغ المدفوع (EGP)
-                    </Field.Label>
-                    <Input
-                      type="text"
-                      inputMode="numeric"
-                      placeholder="مثال: 100 أو 500"
-                      value={amountPaid}
-                      onChange={(e) => handleAmountChange(e.target.value)}
-                      {...inputStyles}
-                      borderColor={formErrors.amountPaid ? "red.300" : "gray.200"}
-                    />
-                    <Field.HelperText fontSize="xs" color="gray.500">
-                      أرقام صحيحة فقط (100 وليس 0100)
-                    </Field.HelperText>
-                    {formErrors.amountPaid && <Field.ErrorText>{formErrors.amountPaid}</Field.ErrorText>}
-                  </Field.Root>
-
-                  <Field.Root invalid={!!formErrors.paymentMethod}>
-                    <Field.Label fontSize="sm" color="gray.700" display="flex" alignItems="center" gap={2}>
-                      <CreditCard size={16} color="#615b36" />
-                      طريقة الدفع
-                    </Field.Label>
-                    <select
-                      value={paymentMethod}
-                      onChange={(e) => {
-                        setPaymentMethod(normalizePaymentMethod(e.target.value));
-                        setFormErrors((prev) => {
-                          const next = { ...prev };
-                          delete next.paymentMethod;
-                          return next;
-                        });
-                      }}
-                      style={selectStyle(!!formErrors.paymentMethod)}
-                    >
-                      {CLINIC_PAYMENT_OPTIONS.map((opt) => (
-                        <option key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
-                    {formErrors.paymentMethod && (
-                      <Field.ErrorText>{formErrors.paymentMethod}</Field.ErrorText>
-                    )}
-                  </Field.Root>
-                </SimpleGrid>
 
                 <Field.Root invalid={!!formErrors.visitType}>
                   <Field.Label fontSize="sm" color="gray.700" mb={2}>

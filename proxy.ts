@@ -25,6 +25,7 @@ export function proxy(request: NextRequest) {
   const isMonthlyAccounts = path.startsWith("/monthly-accounts");
   const isOnlineBookings = path.startsWith("/online-bookings");
   const isTodayBookings = path.startsWith("/today-bookings");
+  const isAllCustomers = path.startsWith("/all-customers");
 
   const isProtected =
     (isAdminArea && !isLoginPage) ||
@@ -32,7 +33,8 @@ export function proxy(request: NextRequest) {
     isPatientHistory ||
     isMonthlyAccounts ||
     isOnlineBookings ||
-    isTodayBookings;
+    isTodayBookings ||
+    isAllCustomers;
 
   if (isProtected && !token) {
     return NextResponse.redirect(new URL("/admin/login", request.url));
@@ -61,5 +63,7 @@ export const config = {
     "/online-bookings/:path*",
     "/today-bookings",
     "/today-bookings/:path*",
+    "/all-customers",
+    "/all-customers/:path*",
   ],
 };

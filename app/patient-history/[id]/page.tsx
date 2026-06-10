@@ -13,10 +13,17 @@ import {
 import {
     BookingHistoryResponse, Booking, BookingStatus, VisitType,
     PatientReport, Medication, CreateReportData,
+    CLINIC_PAYMENT_OPTIONS,
 } from '@/types/booking'
 import api from '@/lib/axios'
 import { toaster } from '@/components/ui/toaster'
 import { canAddPatientVisitReport } from '@/lib/admin-nav'
+import {
+    formatBookingAmount,
+    getProcedureTypes,
+    getVisitTypeLabel,
+    paymentBadgeColors,
+} from '@/lib/booking-display'
 
 function getIsAdmin(): boolean {
     if (typeof document === 'undefined') return false
@@ -236,19 +243,98 @@ export default function PatientHistoryPage() {
         return <Badge colorPalette={color} variant="subtle" px={2} py={0.5} rounded="full">{label}</Badge>
     }
 
-    const getVisitTypeBadge = (visitType?: VisitType) => {
+    const getVisitTypeBadge = (visitType?: VisitType | string | null) => {
         if (!visitType) return <Badge>-</Badge>
         return (
             <Badge colorPalette={visitType === 'checkup' ? 'purple' : 'orange'} variant="subtle" px={2} py={0.5} rounded="full">
-                {visitType === 'checkup' ? 'كشف' : 'إعادة'}
+                {getVisitTypeLabel(visitType)}
             </Badge>
         )
     }
 
-    const formatDate = (s: string) =>
-        new Date(s).toLocaleDateString('ar-EG', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })
+    const formatDate = (s?: string | null) => {
+        if (!s) return '—'
+        return new Date(s).toLocaleDateString('ar-EG', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })
+    }
 
-    const formatAmount = (a: string | number) => (typeof a === 'string' ? parseFloat(a) : a).toFixed(2)
+    const formatBookingDate = (booking: Booking) => {
+        if (booking.appointmentDate) return formatDate(booking.appointmentDate)
+        const { slotDate, timeSlot } = booking
+        if (!slotDate) return '—'
+        const dateText = new Date(`${slotDate}T12:00:00`).toLocaleDateString('ar-EG', {
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+        })
+        return timeSlot ? `${dateText} - ${timeSlot}` : `${dateText} - بدون وقت`
+    }
+
+    const formatAmount = (a: string | number) => formatBookingAmount(a)
+
+    const ProcedureBadges = ({ booking }: { booking: Booking }) => {
+        const procedures = getProcedureTypes(booking)
+        if (procedures.length === 0) return <Text fontSize="sm" color="gray.400">—</Text>
+        return (
+            <Flex gap={1.5} flexWrap="wrap" justify="flex-end">
+                {procedures.map((procedure) => (
+                    <Badge
+                        key={`${booking.id}-${procedure}`}
+                        variant="subtle"
+                        bg="#f4f3ed"
+                        color="#615b36"
+                        border="1px solid"
+                        borderColor="#e8e4d4"
+                        rounded="md"
+                    >
+                        {procedure}
+                    </Badge>
+                ))}
+            </Flex>
+        )
+    }
+
+    const PaymentDetailsBadges = ({ booking }: { booking: Booking }) => {
+        const details = Array.isArray(booking.paymentDetails) ? booking.paymentDetails : []
+        if (details.length === 0) {
+            const method = booking.paymentMethod ?? null
+            const label =
+                booking.paymentMethodLabel ||
+                CLINIC_PAYMENT_OPTIONS.find((opt) => opt.value === method)?.label ||
+                'غير محدد'
+            const colors = paymentBadgeColors(method)
+            return (
+                <Badge bg={colors.bg} color={colors.color} border="1px solid" borderColor={colors.border} px={2} py={1} rounded="lg">
+                    {label}: {formatAmount(booking.amountPaid)} EGP
+                </Badge>
+            )
+        }
+        return (
+            <Flex gap={1.5} flexWrap="wrap" justify="flex-end">
+                {details.map((payment, index) => {
+                    const colors = paymentBadgeColors(payment.method)
+                    const label =
+                        payment.methodLabel ||
+                        CLINIC_PAYMENT_OPTIONS.find((opt) => opt.value === payment.method)?.label ||
+                        payment.method
+                    return (
+                        <Badge
+                            key={`${booking.id}-${payment.method}-${index}`}
+                            bg={colors.bg}
+                            color={colors.color}
+                            border="1px solid"
+                            borderColor={colors.border}
+                            px={2}
+                            py={1}
+                            rounded="lg"
+                        >
+                            {label}: {formatAmount(payment.amount)} EGP
+                        </Badge>
+                    )
+                })}
+            </Flex>
+        )
+    }
 
     // ─── ReportBlock ──────────────────────────────────────────────────────────
     const ReportBlock = ({ report, bookingId }: { report: PatientReport; bookingId?: number }) => (
@@ -388,7 +474,6 @@ export default function PatientHistoryPage() {
                                 <Text>{currentBooking.customerPhone}</Text>
                             </Flex>
                             <Flex gap={2} mt={3} flexWrap="wrap">
-                                {/* @ts-ignore */}
                                 {getVisitTypeBadge(currentBooking.visitType)}
                                 {getStatusBadge(currentBooking.status)}
                                 <Badge colorPalette={currentBooking.bookingType === 'online' ? 'green' : 'blue'} variant="subtle" px={2} py={0.5} rounded="full">
@@ -456,16 +541,22 @@ export default function PatientHistoryPage() {
                                 <Stack gap={4}>
                                     <Flex justify="space-between" align="center">
                                         <Text fontSize="sm" color="gray.500">موعد الحجز</Text>
-                                        {/* @ts-ignore */}
-                                        <Text fontWeight="bold">{formatDate(currentBooking.appointmentDate)}</Text>
+                                        <Text fontWeight="bold" textAlign="left">{formatBookingDate(currentBooking)}</Text>
                                     </Flex>
                                     <Flex justify="space-between" align="center">
                                         <Text fontSize="sm" color="gray.500">المبلغ</Text>
                                         <Text fontWeight="bold" color="#615b36">{formatAmount(currentBooking.amountPaid)} EGP</Text>
                                     </Flex>
+                                    <Flex justify="space-between" align="start" gap={4}>
+                                        <Text fontSize="sm" color="gray.500" flexShrink={0}>طرق الدفع</Text>
+                                        <PaymentDetailsBadges booking={currentBooking} />
+                                    </Flex>
+                                    <Flex justify="space-between" align="start" gap={4}>
+                                        <Text fontSize="sm" color="gray.500" flexShrink={0}>الخدمات</Text>
+                                        <ProcedureBadges booking={currentBooking} />
+                                    </Flex>
                                     <Flex justify="space-between" align="center">
                                         <Text fontSize="sm" color="gray.500">نوع الزيارة</Text>
-                                        {/* @ts-ignore */}
                                         {getVisitTypeBadge(currentBooking.visitType)}
                                     </Flex>
                                     <Flex justify="space-between" align="center">
@@ -551,10 +642,8 @@ export default function PatientHistoryPage() {
                                                 <Flex gap={4} py={4} align="start">
                                                     <Box w={6} h={6} borderRadius="full" bg="#615b36" flexShrink={0} mt={0.5} position="relative" zIndex={1} />
                                                     <Box flex={1} minW={0}>
-                                                        {/* @ts-ignore */}
-                                                        <Text fontWeight="bold" color="#2d3748" fontSize="sm">{formatDate(booking.appointmentDate)}</Text>
+                                                        <Text fontWeight="bold" color="#2d3748" fontSize="sm">{formatBookingDate(booking)}</Text>
                                                         <Flex gap={2} mt={2} flexWrap="wrap">
-                                                        {/* @ts-ignore */}
                                                             {getVisitTypeBadge(booking.visitType)}
                                                             {getStatusBadge(booking.status)}
                                                             <Badge colorPalette={booking.bookingType === 'online' ? 'green' : 'blue'} variant="subtle" fontSize="xs">
@@ -564,6 +653,12 @@ export default function PatientHistoryPage() {
                                                         <Text fontSize="sm" color="#615b36" fontWeight="bold" mt={2}>
                                                             {formatAmount(booking.amountPaid)} EGP
                                                         </Text>
+                                                        <Box mt={2}>
+                                                            <PaymentDetailsBadges booking={booking} />
+                                                        </Box>
+                                                        <Box mt={2}>
+                                                            <ProcedureBadges booking={booking} />
+                                                        </Box>
                                                         {pastReports.length > 0 && (
                                                             <Stack mt={3} gap={3}>
                                                                 {pastReports.map((r, ri) => (

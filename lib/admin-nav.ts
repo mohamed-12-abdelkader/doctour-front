@@ -35,6 +35,16 @@ export const PAGE_LINKS: AdminPageLink[] = [
     permission: "manage_daily_bookings",
   },
   {
+    href: "/all-customers",
+    title: "كل العملاء",
+    description: "عرض العملاء وإجمالي حجوزاتهم مع البحث بالاسم",
+    icon: Users,
+    color: "#0f766e",
+    bg: "#f0fdfa",
+    group: "الحجوزات",
+    permission: "manage_daily_bookings",
+  },
+  {
     href: "/doctor-appointments",
     title: "عيادة الدكتورة",
     description: "جدول المواعيد وحالة الكشف للدكتورة",

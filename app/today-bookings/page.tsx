@@ -21,7 +21,14 @@ import {
   Avatar,
 } from "@chakra-ui/react";
 import { toaster } from "@/components/ui/toaster";
-import { useState, useMemo, useEffect } from "react";
+import {
+  Fragment,
+  useState,
+  useMemo,
+  useEffect,
+  useRef,
+  useTransition,
+} from "react";
 import { useRouter } from "next/navigation";
 import {
   Booking,
@@ -31,9 +38,9 @@ import {
   CreateClinicBookingData,
   UpdateBookingData,
   CLINIC_PAYMENT_OPTIONS,
+  type ClinicPaymentMethod,
 } from "@/types/booking";
 import {
-  collectProcedureOptions,
   formatBookingAmount,
   formatBookingTime,
   getPaymentInfo,
@@ -55,6 +62,7 @@ import {
   RefreshCw,
   Users,
   DollarSign,
+  Download,
   CalendarDays,
   ChevronRight,
   ChevronLeft,
@@ -76,10 +84,31 @@ import {
   setSelectedDoctorId,
 } from "@/lib/doctor-context";
 
+const PAGE_SIZE_OPTIONS = [25, 50, 100, 200] as const;
+
+function getInclusiveDateCount(start: string, end: string): number {
+  const startTime = new Date(`${start}T00:00:00`).getTime();
+  const endTime = new Date(`${end}T00:00:00`).getTime();
+  if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) return 1;
+  return Math.max(1, Math.floor((endTime - startTime) / 86400000) + 1);
+}
+
+function normalizeSearchText(value: unknown): string {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u064B-\u065F\u0670]/g, "")
+    .replace(/[أإآ]/g, "ا")
+    .replace(/ى/g, "ي")
+    .replace(/ة/g, "ه");
+}
+
 export default function TodayBookings() {
   const router = useRouter();
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
   const [filterType, setFilterType] = useState<"all" | BookingType>("all");
   const [filterStatus, setFilterStatus] = useState<"all" | BookingStatus>(
     "all"
@@ -97,6 +126,7 @@ export default function TodayBookings() {
   const [pickingEnd, setPickingEnd] = useState(false);
   const [hoverDate, setHoverDate] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalDefaultNoTime, setModalDefaultNoTime] = useState(false);
   const [editingBooking, setEditingBooking] = useState<Booking | null>(null);
@@ -105,9 +135,37 @@ export default function TodayBookings() {
   const [canSelectDoctor, setCanSelectDoctor] = useState(false);
   const [canManageExamination, setCanManageExamination] = useState(false);
   const [showTotalIncome, setShowTotalIncome] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(
+    25,
+  );
+  const [serverTotal, setServerTotal] = useState<number | null>(null);
+  const [serverPaginated, setServerPaginated] = useState(false);
+  const [expandedActionBookingId, setExpandedActionBookingId] = useState<number | null>(
+    null,
+  );
+  const [, startTransition] = useTransition();
+  const fetchAbortRef = useRef<AbortController | null>(null);
   const [changingExaminationId, setChangingExaminationId] = useState<number | null>(
     null,
   );
+  const selectedRangeDays = useMemo(
+    () => getInclusiveDateCount(rangeStart, rangeEnd),
+    [rangeStart, rangeEnd],
+  );
+  const liveSearchTerm = searchQuery.trim();
+  const searchTerm = debouncedSearchQuery.trim();
+  const clientFilterActive =
+    liveSearchTerm.length > 0 ||
+    filterStatus !== "all" ||
+    filterProcedure !== "all" ||
+    filterPaymentMethod !== "all";
+  const canUseServerPagination = !clientFilterActive;
+  const activeServerPaginated = serverPaginated && canUseServerPagination;
+  const serverPageKey =
+    activeServerPaginated
+      ? `${currentPage}:${pageSize}`
+      : "client-page";
 
   useEffect(() => {
     const role = getCurrentRole();
@@ -116,6 +174,10 @@ export default function TodayBookings() {
     setCanManageExamination(canChangeExaminationStatus(role));
     const current = getCurrentDoctorId();
     if (current) setDoctorId(current);
+  }, []);
+
+  useEffect(() => {
+    return () => fetchAbortRef.current?.abort();
   }, []);
 
   useEffect(() => {
@@ -132,16 +194,26 @@ export default function TodayBookings() {
     loadDoctors();
   }, [canSelectDoctor]);
 
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery.trim());
+    }, 300);
+    return () => window.clearTimeout(id);
+  }, [searchQuery]);
+
   const fetchBookings = async (silent = false) => {
     if (!silent) setIsLoading(true);
+    fetchAbortRef.current?.abort();
+    const controller = new AbortController();
+    fetchAbortRef.current = controller;
     try {
       const params: any = {};
 
       // نوع الحجز
       if (filterType !== "all") params.type = filterType;
 
-      // الحالة — بس لو محددة صريح (الـ API بيحط confirmed تلقائياً لما في تاريخ)
-      if (filterStatus !== "all") params.status = filterStatus;
+      // نرسل الملغي فقط للسيرفر. تب "انتظار" يعتمد على حالة الكشف محليًا.
+      if (filterStatus === "cancelled") params.status = filterStatus;
 
       // قواعد الأولوية حسب الـ doc:
       if (rangeStart === rangeEnd) {
@@ -153,13 +225,47 @@ export default function TodayBookings() {
         params.endDate = rangeEnd;
       }
       if (selectedDoctorId) params.doctorId = selectedDoctorId;
+      if (canUseServerPagination) {
+        params.page = currentPage;
+        params.limit = pageSize;
+      } else if (clientFilterActive) {
+        // عند البحث أو الفلاتر المحلية نحتاج كل نتائج النطاق ثم نفلتر في الفرونت.
+        params.page = 1;
+        params.limit = 10000;
+      }
 
-      const response = await api.get("/bookings/all", { params });
+      const response = await api.get("/bookings/all", {
+        params,
+        signal: controller.signal,
+      });
 
       // الـ API الجديد بيرجع { total, bookings } أو مصفوفة مباشرة (backward compat)
       const data = response.data;
-      setBookings(Array.isArray(data) ? data : (data.bookings ?? []));
+      const nextBookings = Array.isArray(data) ? data : (data.bookings ?? []);
+      const totalFromResponse = Number(
+        data?.total ??
+          data?.pagination?.total ??
+          data?.meta?.total ??
+          nextBookings.length,
+      );
+      const nextServerTotal = Number.isFinite(totalFromResponse)
+        ? totalFromResponse
+        : nextBookings.length;
+      const nextServerPaginated =
+        canUseServerPagination && nextServerTotal > nextBookings.length;
+      startTransition(() => {
+        setBookings(nextBookings);
+        setServerTotal(nextServerTotal);
+        setServerPaginated(nextServerPaginated);
+      });
     } catch (error: any) {
+      if (
+        error?.name === "CanceledError" ||
+        error?.code === "ERR_CANCELED" ||
+        controller.signal.aborted
+      ) {
+        return;
+      }
       if (!silent) {
         toaster.create({
           title: "خطأ في جلب البيانات",
@@ -169,25 +275,49 @@ export default function TodayBookings() {
         });
       }
     } finally {
-      if (!silent) setIsLoading(false);
+      const isLatestRequest = fetchAbortRef.current === controller;
+      if (isLatestRequest) {
+        fetchAbortRef.current = null;
+        if (!silent) setIsLoading(false);
+      }
     }
   };
 
   // جلب أولي وعند تغيير الفلاتر/التاريخ
   useEffect(() => {
     fetchBookings();
-  }, [filterType, filterStatus, rangeStart, rangeEnd, selectedDoctorId]);
+  }, [
+    filterType,
+    filterStatus,
+    rangeStart,
+    rangeEnd,
+    selectedDoctorId,
+    searchTerm,
+    serverPageKey,
+    canUseServerPagination,
+  ]);
 
-  // ريل تايم: تحديث تلقائي كل 5 ثوانٍ لظهور تغييرات حالة الكشف دون ريفرش
+  // ريل تايم لليوم الواحد فقط؛ النطاقات الكبيرة كانت تعيد تحميل آلاف الحجوزات كل ثواني.
   useEffect(() => {
-    const POLL_INTERVAL_MS = 5000;
+    if (selectedRangeDays > 1) return;
+    const POLL_INTERVAL_MS = 15000;
     const id = setInterval(() => {
       if (typeof document !== "undefined" && document.visibilityState === "visible") {
         fetchBookings(true);
       }
     }, POLL_INTERVAL_MS);
     return () => clearInterval(id);
-  }, [filterType, filterStatus, rangeStart, rangeEnd, selectedDoctorId]);
+  }, [
+    filterType,
+    filterStatus,
+    rangeStart,
+    rangeEnd,
+    selectedDoctorId,
+    selectedRangeDays,
+    searchTerm,
+    serverPageKey,
+    canUseServerPagination,
+  ]);
 
   // Calendar helpers
   const calYear = calViewDate.getFullYear();
@@ -242,29 +372,100 @@ export default function TodayBookings() {
     setCalViewDate(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
   };
 
-
-  const filteredBookings = useMemo(() => {
-    let list = bookings.filter((b) => matchesPaymentFilter(b, filterPaymentMethod));
-
-    if (filterProcedure !== "all") {
-      list = list.filter((b) => getProcedureTypes(b).includes(filterProcedure));
-    }
-
-    if (!searchQuery) return list;
-    const searchLower = searchQuery.toLowerCase();
-    return list.filter(
-      (booking) =>
-        booking.customerName.toLowerCase().includes(searchLower) ||
-        booking.customerPhone.includes(searchQuery),
-    );
-  }, [bookings, searchQuery, filterProcedure, filterPaymentMethod]);
-
-  const procedureOptions = useMemo(
-    () => collectProcedureOptions(bookings),
+  const indexedBookings = useMemo(
+    () =>
+      bookings.map((booking) => ({
+        booking,
+        procedures: getProcedureTypes(booking),
+        searchText: normalizeSearchText(
+          `${booking.customerName ?? ""} ${booking.customerPhone ?? ""}`,
+        ),
+      })),
     [bookings],
   );
 
+  const filteredBookings = useMemo(() => {
+    let list = indexedBookings;
+
+    if (filterPaymentMethod !== "all") {
+      list = list.filter(({ booking }) =>
+        matchesPaymentFilter(booking, filterPaymentMethod),
+      );
+    }
+
+    if (filterProcedure !== "all") {
+      list = list.filter(({ procedures }) => procedures.includes(filterProcedure));
+    }
+
+    if (filterStatus === "pending") {
+      list = list.filter(
+        ({ booking }) =>
+          booking.examinationStatus !== "done" &&
+          booking.status !== "cancelled" &&
+          booking.status !== "rejected",
+      );
+    } else if (filterStatus === "cancelled") {
+      list = list.filter(({ booking }) => booking.status === "cancelled");
+    }
+
+    const query = liveSearchTerm;
+    if (!query) return list.map(({ booking }) => booking);
+    const searchLower = normalizeSearchText(query);
+    return list
+      .filter(({ searchText }) => searchText.includes(searchLower))
+      .map(({ booking }) => booking);
+  }, [indexedBookings, liveSearchTerm, filterProcedure, filterPaymentMethod]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [
+    liveSearchTerm,
+    filterType,
+    filterStatus,
+    filterProcedure,
+    filterPaymentMethod,
+    rangeStart,
+    rangeEnd,
+    selectedDoctorId,
+    pageSize,
+  ]);
+
+  const effectiveTotal = activeServerPaginated
+    ? (serverTotal ?? filteredBookings.length)
+    : filteredBookings.length;
+  const totalPages = Math.max(1, Math.ceil(effectiveTotal / pageSize));
+  const safeCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+
+  useEffect(() => {
+    setCurrentPage((page) => Math.min(Math.max(1, page), totalPages));
+  }, [totalPages]);
+
+  const visibleBookings = useMemo(() => {
+    if (activeServerPaginated) return filteredBookings;
+    const start = (safeCurrentPage - 1) * pageSize;
+    return filteredBookings.slice(start, start + pageSize);
+  }, [filteredBookings, safeCurrentPage, pageSize, activeServerPaginated]);
+
+  const visibleStart = effectiveTotal === 0
+    ? 0
+    : (safeCurrentPage - 1) * pageSize + 1;
+  const visibleEnd = activeServerPaginated
+    ? Math.min(visibleStart + visibleBookings.length - 1, effectiveTotal)
+    : Math.min(safeCurrentPage * pageSize, effectiveTotal);
+
+  const procedureOptions = useMemo(
+    () => {
+      const set = new Set<string>();
+      for (const item of indexedBookings) {
+        for (const procedure of item.procedures) set.add(procedure);
+      }
+      return Array.from(set).sort((a, b) => a.localeCompare(b, "ar"));
+    },
+    [indexedBookings],
+  );
+
   const totalIncome = useMemo(() => {
+    if (!showTotalIncome) return 0;
     return filteredBookings.reduce((sum, b) => {
       const amount =
         typeof b.amountPaid === "string"
@@ -272,29 +473,94 @@ export default function TodayBookings() {
           : b.amountPaid;
       return sum + (amount || 0);
     }, 0);
-  }, [filteredBookings]);
+  }, [filteredBookings, showTotalIncome]);
+
+  const incomeByPaymentMethod = useMemo(() => {
+    if (!showTotalIncome) return [];
+    const map = new Map<
+      ClinicPaymentMethod | "none",
+      { label: string; amount: number }
+    >();
+
+    for (const booking of filteredBookings) {
+      const details = Array.isArray(booking.paymentDetails)
+        ? booking.paymentDetails
+        : [];
+
+      if (details.length > 0) {
+        for (const payment of details) {
+          const method = payment.method ?? "none";
+          const label =
+            payment.methodLabel ||
+            CLINIC_PAYMENT_OPTIONS.find((opt) => opt.value === method)
+              ?.label ||
+            String(method);
+          const current = map.get(method) ?? { label, amount: 0 };
+          current.amount += Number(payment.amount ?? 0);
+          map.set(method, current);
+        }
+        continue;
+      }
+
+      const method = booking.paymentMethod ?? "none";
+      const label =
+        booking.paymentMethodLabel ||
+        CLINIC_PAYMENT_OPTIONS.find((opt) => opt.value === method)?.label ||
+        "غير محدد";
+      const current = map.get(method) ?? { label, amount: 0 };
+      current.amount +=
+        typeof booking.amountPaid === "string"
+          ? parseFloat(booking.amountPaid) || 0
+          : Number(booking.amountPaid ?? 0);
+      map.set(method, current);
+    }
+
+    return Array.from(map.values()).filter((row) => row.amount > 0);
+  }, [filteredBookings, showTotalIncome]);
 
   function buildClinicPayload(
     data: CreateClinicBookingData,
     allowExtraBooking = false,
   ): Record<string, unknown> {
     const procedureTypes = data.procedureTypes ?? data.visitTypes ?? [];
+    const paymentAmount = Number(data.amountPaid ?? 0);
+    const payments =
+      Array.isArray(data.payments) && data.payments.length > 0
+        ? data.payments.map((payment) => ({
+            method: payment.method,
+            amount: Number(payment.amount),
+            ...(payment.transferFromPhone
+              ? { transferFromPhone: payment.transferFromPhone.replace(/\D/g, "") }
+              : {}),
+          }))
+        : [];
     const payload: Record<string, unknown> = {
       name: data.name,
       phone: data.phone,
+      ...(data.age != null ? { age: data.age } : {}),
       date: data.date,
       doctorId: data.doctorId,
-      paymentMethod: data.paymentMethod,
-      amountPaid: data.amountPaid,
       procedureTypes,
+      noTime: data.noTime === true,
+      allowExtraBooking: allowExtraBooking || data.allowExtraBooking === true,
+      clientRequestId:
+        data.clientRequestId ??
+        `clinic-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
     };
-    if (data.noTime) {
-      payload.noTime = true;
-    } else if (data.time) {
-      payload.time = data.time;
+    if (payments.length > 1) {
+      payload.payments = payments;
+    } else {
+      const singlePayment = payments[0];
+      payload.paymentMethod = data.paymentMethod ?? singlePayment?.method;
+      payload.amountPaid = Number.isFinite(paymentAmount) ? paymentAmount : 0;
+      const transferFromPhone =
+        data.transferFromPhone ?? singlePayment?.transferFromPhone;
+      if (transferFromPhone) {
+        payload.transferFromPhone = transferFromPhone.replace(/\D/g, "");
+      }
     }
-    if (allowExtraBooking || data.allowExtraBooking) {
-      payload.allowExtraBooking = true;
+    if (!data.noTime && data.time) {
+      payload.time = data.time;
     }
     return payload;
   }
@@ -429,9 +695,39 @@ export default function TodayBookings() {
         ? data.visitTypes
         : undefined;
     const noTime = data.noTime === true;
+    if (editingBooking) {
+      const updatePayload: UpdateBookingData & { procedureTypes?: string[] } = {
+        name: data.name ?? data.customerName,
+        phone: data.phone ?? data.customerPhone,
+        age:
+          data.age != null && Number.isFinite(Number(data.age))
+            ? Number(data.age)
+            : undefined,
+        amountPaid:
+          typeof data.amountPaid === "string"
+            ? parseInt(data.amountPaid, 10)
+            : data.amountPaid,
+        paymentMethod: data.paymentMethod,
+        transferFromPhone:
+          typeof data.transferFromPhone === "string"
+            ? data.transferFromPhone.replace(/\D/g, "")
+            : undefined,
+        payments: Array.isArray(data.payments) ? data.payments : undefined,
+        visitTypes: procedureTypes,
+        ...(data.visitType != null ? { visitType: data.visitType } : {}),
+      };
+      updatePayload.procedureTypes = procedureTypes;
+      await handleUpdateBooking(editingBooking.id, updatePayload);
+      return;
+    }
+
     const normalized: CreateClinicBookingData = {
       name: data.name ?? data.customerName,
       phone: data.phone ?? data.customerPhone,
+      age:
+        data.age != null && Number.isFinite(Number(data.age))
+          ? Number(data.age)
+          : undefined,
       date: data.date ?? data.appointmentDate,
       doctorId: Number(data.doctorId ?? selectedDoctorId) || undefined,
       amountPaid:
@@ -439,19 +735,39 @@ export default function TodayBookings() {
           ? parseInt(data.amountPaid, 10)
           : data.amountPaid,
       paymentMethod: data.paymentMethod,
+      transferFromPhone:
+        typeof data.transferFromPhone === "string"
+          ? data.transferFromPhone.replace(/\D/g, "")
+          : undefined,
+      payments:
+        Array.isArray(data.payments) && data.payments.length > 0
+          ? data.payments
+          : data.paymentMethod && data.amountPaid != null
+            ? [
+                {
+                  method: data.paymentMethod,
+                  amount:
+                    typeof data.amountPaid === "string"
+                      ? parseInt(data.amountPaid, 10)
+                      : data.amountPaid,
+                  ...(typeof data.transferFromPhone === "string" &&
+                  data.transferFromPhone
+                    ? { transferFromPhone: data.transferFromPhone.replace(/\D/g, "") }
+                    : {}),
+                },
+              ]
+            : undefined,
       procedureTypes,
       visitTypes: procedureTypes,
       noTime,
+      allowExtraBooking: false,
+      clientRequestId: `clinic-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
       ...(noTime ? {} : { time: data.time ?? data.timeSlot }),
       ...(editingBooking && data.visitType != null
         ? { visitType: data.visitType }
         : {}),
     };
-    if (editingBooking) {
-      await handleUpdateBooking(editingBooking.id, normalized);
-    } else {
-      await handleCreateBooking(normalized);
-    }
+    await handleCreateBooking(normalized);
   };
 
   const getStatusBadge = (status: BookingStatus) => {
@@ -511,7 +827,10 @@ export default function TodayBookings() {
     if (examinationStatus === "done")
       return (
         <Badge
-          bg="#666139" color="white" _hover={{ bg: "#555230" }}
+          bg="#dcfce7"
+          color="#166534"
+          border="1px solid"
+          borderColor="#86efac"
           variant="subtle"
           px={2}
           py={0.5}
@@ -540,9 +859,223 @@ export default function TodayBookings() {
   };
 
   const getRowBg = (examinationStatus?: ExaminationStatus) => {
-    if (examinationStatus === "done") return "#f4f3ed";
+    if (examinationStatus === "done") return "#ecfdf5";
     if (examinationStatus === "waiting") return "yellow.50";
     return undefined;
+  };
+
+  const getRoleLabel = (role?: string | null) => {
+    if (role === "admin") return "مدير";
+    if (role === "doctor") return "طبيب";
+    if (role === "secretary") return "سكرتير";
+    if (role === "staff") return "موظف";
+    return role || "مستخدم";
+  };
+
+  const formatActionTime = (value?: string | null) => {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    return new Intl.DateTimeFormat("ar-EG", {
+      day: "numeric",
+      month: "short",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(date);
+  };
+
+  const getLatestAction = (booking: Booking) => {
+    const actions = Array.isArray(booking.actions) ? booking.actions : [];
+    if (actions.length > 0) {
+      return actions.reduce((latest, action) => {
+        const latestTime = latest.createdAt ? new Date(latest.createdAt).getTime() : 0;
+        const actionTime = action.createdAt ? new Date(action.createdAt).getTime() : 0;
+        return actionTime >= latestTime ? action : latest;
+      }, actions[actions.length - 1]);
+    }
+    if (booking.assignedByUser) {
+      return {
+        actionLabel: "تم بواسطة",
+        user: booking.assignedByUser,
+        createdAt: booking.createdAt,
+      };
+    }
+    return null;
+  };
+
+  const renderActionActor = (booking: Booking, compact = false) => {
+    const latestAction = getLatestAction(booking);
+    const user = latestAction?.user;
+    if (!latestAction || !user?.name) {
+      return (
+        <Text fontSize="sm" color="gray.400">
+          —
+        </Text>
+      );
+    }
+
+    const actionLabel = latestAction.actionLabel || "إجراء على الحجز";
+    const fields = Array.isArray(latestAction.metadata?.fields)
+      ? latestAction.metadata.fields
+      : [];
+    const timeLabel = formatActionTime(latestAction.createdAt);
+
+    return (
+      <Flex
+        align="center"
+        gap={compact ? 2 : 2.5}
+        bg={compact ? "white" : "#f8fafc"}
+        border="1px solid"
+        borderColor={compact ? "gray.200" : "gray.100"}
+        borderRadius="xl"
+        px={compact ? 3 : 3.5}
+        py={compact ? 2 : 2.5}
+        boxShadow={compact ? "none" : "xs"}
+        maxW="full"
+      >
+        <Avatar.Root size={compact ? "xs" : "sm"} bg="#666139" flexShrink={0}>
+          <Avatar.Fallback color="white" fontWeight="bold" fontSize="xs">
+            {user.name.charAt(0)}
+          </Avatar.Fallback>
+        </Avatar.Root>
+        <Box minW={0}>
+          <Flex align="center" gap={1.5} wrap="wrap">
+            <Text
+              fontSize={compact ? "xs" : "sm"}
+              fontWeight="bold"
+              color="#2d3748"
+              lineClamp={1}
+            >
+              {user.name}
+            </Text>
+            <Badge
+              colorPalette="gray"
+              variant="subtle"
+              fontSize="10px"
+              rounded="full"
+              px={1.5}
+            >
+              {getRoleLabel(user.role)}
+            </Badge>
+          </Flex>
+          <Flex align="center" gap={1.5} color="gray.500" mt={0.5} wrap="wrap">
+            <CheckCircle size={12} color="#666139" />
+            <Text fontSize="xs" lineClamp={1}>
+              {actionLabel}
+            </Text>
+            {timeLabel && (
+              <Text fontSize="10px" color="gray.400">
+                {timeLabel}
+              </Text>
+            )}
+          </Flex>
+          {fields.length > 0 && !compact && (
+            <Text fontSize="10px" color="gray.400" mt={0.5} lineClamp={1}>
+              الحقول: {fields.join("، ")}
+            </Text>
+          )}
+        </Box>
+      </Flex>
+    );
+  };
+
+  const renderBookingActionDetails = (booking: Booking) => {
+    const actions = Array.isArray(booking.actions) ? booking.actions : [];
+    const fallbackAction = getLatestAction(booking);
+    const visibleActions = actions.length > 0 ? actions : fallbackAction ? [fallbackAction] : [];
+
+    if (visibleActions.length === 0) {
+      return (
+        <Box bg="white" borderRadius="xl" border="1px solid" borderColor="gray.100" p={4}>
+          <Text color="gray.500" fontSize="sm">
+            لا توجد بيانات إجراءات لهذا الحجز.
+          </Text>
+        </Box>
+      );
+    }
+
+    return (
+      <Box bg="#f8fafc" borderRadius="xl" border="1px solid" borderColor="gray.100" p={4}>
+        <Flex align="center" justify="space-between" gap={3} mb={4} wrap="wrap">
+          <Box>
+            <Text fontWeight="bold" color="#2d3748">
+              سجل إجراءات الحجز
+            </Text>
+            <Text fontSize="sm" color="gray.500">
+              {booking.customerName} - رقم الحجز #{booking.id}
+            </Text>
+          </Box>
+          <Badge colorPalette="gray" variant="subtle" rounded="full" px={3}>
+            {visibleActions.length} إجراء
+          </Badge>
+        </Flex>
+
+        <SimpleGrid columns={{ base: 1, lg: 2 }} gap={3}>
+          {visibleActions.map((action, actionIndex) => {
+            const user = action.user;
+            const fields = Array.isArray(action.metadata?.fields)
+              ? action.metadata.fields
+              : [];
+            const timeLabel = formatActionTime(action.createdAt);
+
+            return (
+              <Flex
+                key={`${action.action || "action"}-${action.createdAt || actionIndex}`}
+                align="flex-start"
+                gap={3}
+                bg="white"
+                border="1px solid"
+                borderColor="gray.100"
+                borderRadius="xl"
+                p={4}
+              >
+                <Avatar.Root size="sm" bg="#666139" flexShrink={0}>
+                  <Avatar.Fallback color="white" fontWeight="bold" fontSize="xs">
+                    {user?.name?.charAt(0) || "?"}
+                  </Avatar.Fallback>
+                </Avatar.Root>
+                <Box minW={0} flex={1}>
+                  <Flex align="center" gap={2} wrap="wrap">
+                    <Text fontWeight="bold" color="#1f2937">
+                      {user?.name || "مستخدم غير معروف"}
+                    </Text>
+                    <Badge colorPalette="gray" variant="subtle" rounded="full" px={2}>
+                      {getRoleLabel(user?.role)}
+                    </Badge>
+                  </Flex>
+                  <Flex align="center" gap={2} color="gray.600" mt={1} wrap="wrap">
+                    <CheckCircle size={14} color="#666139" />
+                    <Text fontSize="sm">
+                      {action.actionLabel || "إجراء على الحجز"}
+                    </Text>
+                    {timeLabel && (
+                      <Text fontSize="xs" color="gray.400">
+                        {timeLabel}
+                      </Text>
+                    )}
+                  </Flex>
+                  {fields.length > 0 && (
+                    <Flex gap={1.5} mt={2} wrap="wrap">
+                      {fields.map((field) => (
+                        <Badge
+                          key={field}
+                          colorPalette="blue"
+                          variant="outline"
+                          rounded="full"
+                          fontSize="10px"
+                        >
+                          {field}
+                        </Badge>
+                      ))}
+                    </Flex>
+                  )}
+                </Box>
+              </Flex>
+            );
+          })}
+        </SimpleGrid>
+      </Box>
+    );
   };
 
   const handleExaminationStatusChange = async (
@@ -630,7 +1163,10 @@ export default function TodayBookings() {
     </Flex>
   );
 
-  const handlePrint = () => window.print();
+  const handlePrint = () => {
+    setShowTotalIncome(true);
+    window.setTimeout(() => window.print(), 50);
+  };
 
   const renderProcedureTags = (booking: Booking, compact = false) => {
     const types = getProcedureTypes(booking);
@@ -664,7 +1200,46 @@ export default function TodayBookings() {
     );
   };
 
-  const renderPaymentBadge = (booking: Booking) => {
+  const renderPaymentBadges = (booking: Booking) => {
+    const details = Array.isArray(booking.paymentDetails)
+      ? booking.paymentDetails
+      : [];
+
+    if (details.length > 0) {
+      return (
+        <Flex wrap="wrap" gap={1.5}>
+          {details.map((payment, index) => {
+            const colors = paymentBadgeColors(payment.method);
+            const label =
+              payment.methodLabel ||
+              CLINIC_PAYMENT_OPTIONS.find((o) => o.value === payment.method)
+                ?.label ||
+              payment.method;
+            return (
+              <Badge
+                key={`${booking.id}-${payment.method}-${index}`}
+                display="inline-flex"
+                alignItems="center"
+                gap={1}
+                bg={colors.bg}
+                color={colors.color}
+                border="1px solid"
+                borderColor={colors.border}
+                fontSize="xs"
+                px={2}
+                py={1}
+                rounded="lg"
+                fontWeight="semibold"
+              >
+                <CreditCard size={12} />
+                {label}: {formatBookingAmount(payment.amount)} EGP
+              </Badge>
+            );
+          })}
+        </Flex>
+      );
+    }
+
     const { method, label } = getPaymentInfo(booking);
     const colors = paymentBadgeColors(method);
     return (
@@ -685,6 +1260,548 @@ export default function TodayBookings() {
         <CreditCard size={12} />
         {label}
       </Badge>
+    );
+  };
+
+  const getBookingPaymentDetails = (booking: Booking) => {
+    const details = Array.isArray(booking.paymentDetails)
+      ? booking.paymentDetails
+      : [];
+    if (details.length > 0) return details;
+
+    const amount =
+      typeof booking.amountPaid === "string"
+        ? parseFloat(booking.amountPaid) || 0
+        : Number(booking.amountPaid ?? 0);
+    const { method, label } = getPaymentInfo(booking);
+
+    return [
+      {
+        amount,
+        method,
+        methodLabel: label,
+        transferFromPhone: booking.transferFromPhone ?? undefined,
+      },
+    ];
+  };
+
+  const renderPaymentDetailsPanel = (booking: Booking) => {
+    const details = getBookingPaymentDetails(booking);
+    const hasTransferPhone = details.some((payment) => payment.transferFromPhone);
+
+    return (
+      <Box bg="white" borderRadius="xl" border="1px solid" borderColor="gray.100" p={4}>
+        <Flex align="center" justify="space-between" gap={3} mb={3} wrap="wrap">
+          <Box>
+            <Text fontWeight="bold" color="#2d3748">
+              تفاصيل الدفع
+            </Text>
+            <Text fontSize="sm" color="gray.500">
+              أرقام التحويل تظهر هنا فقط عند فتح تفاصيل الحجز.
+            </Text>
+          </Box>
+          {hasTransferPhone && (
+            <Badge colorPalette="green" variant="subtle" rounded="full" px={3}>
+              يوجد رقم تحويل
+            </Badge>
+          )}
+        </Flex>
+
+        <SimpleGrid columns={{ base: 1, md: 2, xl: 3 }} gap={3}>
+          {details.map((payment, index) => {
+            const method = payment.method ?? booking.paymentMethod ?? null;
+            const colors = paymentBadgeColors(method);
+            const label =
+              payment.methodLabel ||
+              CLINIC_PAYMENT_OPTIONS.find((opt) => opt.value === payment.method)
+                ?.label ||
+              String(method || "غير محدد");
+
+            return (
+              <Box
+                key={`${booking.id}-payment-detail-${method}-${index}`}
+                bg={colors.bg}
+                border="1px solid"
+                borderColor={colors.border}
+                borderRadius="xl"
+                p={3}
+              >
+                <Flex align="center" justify="space-between" gap={3}>
+                  <Flex align="center" gap={2} color={colors.color} fontWeight="bold">
+                    <CreditCard size={15} />
+                    <Text fontSize="sm">{label}</Text>
+                  </Flex>
+                  <Text fontSize="sm" fontWeight="bold" color={colors.color}>
+                    {formatBookingAmount(payment.amount)} EGP
+                  </Text>
+                </Flex>
+                {payment.transferFromPhone ? (
+                  <Box mt={3} bg="whiteAlpha.800" borderRadius="lg" px={3} py={2}>
+                    <Text fontSize="xs" color="gray.500">
+                      رقم المحوّل منه
+                    </Text>
+                    <Text
+                      fontSize="sm"
+                      fontWeight="bold"
+                      color="#1f2937"
+                      dir="ltr"
+                      textAlign="right"
+                    >
+                      {payment.transferFromPhone}
+                    </Text>
+                  </Box>
+                ) : (
+                  <Text fontSize="xs" color="gray.500" mt={3}>
+                    لا يوجد رقم تحويل لهذه الطريقة
+                  </Text>
+                )}
+              </Box>
+            );
+          })}
+        </SimpleGrid>
+      </Box>
+    );
+  };
+
+  const getStatusLabel = (status?: BookingStatus | string | null) => {
+    if (status === "confirmed") return "مؤكد";
+    if (status === "pending") return "قيد الانتظار";
+    if (status === "cancelled") return "ملغي";
+    if (status === "rejected") return "مرفوض";
+    return status || "غير محدد";
+  };
+
+  const getExaminationStatusLabel = (status?: ExaminationStatus | string | null) => {
+    if (status === "done") return "تم الكشف";
+    if (status === "waiting") return "انتظار";
+    return "غير محدد";
+  };
+
+  const getBookingTypeLabel = (type?: BookingType | string | null) => {
+    if (type === "clinic") return "عيادة";
+    if (type === "online") return "أونلاين";
+    return type || "غير محدد";
+  };
+
+  const formatExportDateTime = (value?: string | null) => {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return new Intl.DateTimeFormat("ar-EG", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(date);
+  };
+
+  const escapeHtml = (value: unknown) =>
+    String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+
+  const buildExportBaseParams = () => {
+    const params: Record<string, string | number> = {
+      page: 1,
+      limit: 10000,
+    };
+
+    if (filterType !== "all") params.type = filterType;
+    if (filterStatus === "cancelled") params.status = filterStatus;
+    if (rangeStart === rangeEnd) {
+      params.date = rangeStart;
+    } else {
+      params.startDate = rangeStart;
+      params.endDate = rangeEnd;
+    }
+    if (selectedDoctorId) params.doctorId = selectedDoctorId;
+
+    return params;
+  };
+
+  const applyExportFilters = (sourceBookings: Booking[]) => {
+    let list = sourceBookings.map((booking) => ({
+      booking,
+      procedures: getProcedureTypes(booking),
+      searchText: normalizeSearchText(
+        `${booking.customerName ?? ""} ${booking.customerPhone ?? ""}`,
+      ),
+    }));
+
+    if (filterPaymentMethod !== "all") {
+      list = list.filter(({ booking }) =>
+        matchesPaymentFilter(booking, filterPaymentMethod),
+      );
+    }
+
+    if (filterProcedure !== "all") {
+      list = list.filter(({ procedures }) => procedures.includes(filterProcedure));
+    }
+
+    if (filterStatus === "pending") {
+      list = list.filter(
+        ({ booking }) =>
+          booking.examinationStatus !== "done" &&
+          booking.status !== "cancelled" &&
+          booking.status !== "rejected",
+      );
+    } else if (filterStatus === "cancelled") {
+      list = list.filter(({ booking }) => booking.status === "cancelled");
+    }
+
+    const query = liveSearchTerm;
+    if (query) {
+      const searchLower = normalizeSearchText(query);
+      list = list.filter(({ searchText }) => searchText.includes(searchLower));
+    }
+
+    return list.map(({ booking }) => booking);
+  };
+
+  const buildExcelHtml = (rows: Array<Array<unknown>>) => {
+    const headers = [
+      "رقم",
+      "اسم العميل",
+      "الهاتف",
+      "السن",
+      "التاريخ",
+      "الوقت",
+      "نوع الحجز",
+      "الخدمات",
+      "حالة الحجز",
+      "حالة الكشف",
+      "إجمالي المدفوع",
+      "تفاصيل الدفع",
+      "أرقام التحويل",
+      "آخر إجراء",
+      "منفذ آخر إجراء",
+      "سجل الإجراءات",
+      "تاريخ الإنشاء",
+      "آخر تحديث",
+    ];
+
+    const headerHtml = headers
+      .map((header) => `<th>${escapeHtml(header)}</th>`)
+      .join("");
+    const bodyHtml = rows
+      .map(
+        (row) =>
+          `<tr>${row
+            .map((cell) => `<td style="mso-number-format:'\\@';">${escapeHtml(cell)}</td>`)
+            .join("")}</tr>`,
+      )
+      .join("");
+
+    return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body { direction: rtl; font-family: Tahoma, Arial, sans-serif; }
+    table { border-collapse: collapse; width: 100%; }
+    th { background: #615b36; color: #fff; font-weight: bold; }
+    th, td { border: 1px solid #d1d5db; padding: 8px; text-align: right; vertical-align: top; }
+    td { color: #111827; }
+  </style>
+</head>
+<body>
+  <table>
+    <thead><tr>${headerHtml}</tr></thead>
+    <tbody>${bodyHtml}</tbody>
+  </table>
+</body>
+</html>`;
+  };
+
+  const downloadExcelFile = (html: string) => {
+    const blob = new Blob(["\ufeff", html], {
+      type: "application/vnd.ms-excel;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const datePart =
+      rangeStart === rangeEnd ? rangeStart : `${rangeStart}_to_${rangeEnd}`;
+    a.href = url;
+    a.download = `today-bookings-${datePart}.xls`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportExcel = async () => {
+    if (isExporting) return;
+    setIsExporting(true);
+
+    try {
+      const response = await api.get("/bookings/all", {
+        params: buildExportBaseParams(),
+      });
+      const data = response.data;
+      const sourceBookings = (Array.isArray(data)
+        ? data
+        : (data.bookings ?? [])) as Booking[];
+      const exportBookings = applyExportFilters(sourceBookings);
+
+      if (exportBookings.length === 0) {
+        toaster.create({
+          title: "لا توجد بيانات للتصدير",
+          description: "غيّر الفلاتر أو التاريخ ثم حاول مرة أخرى.",
+          type: "info",
+          duration: 2500,
+        });
+        return;
+      }
+
+      const rows = exportBookings.map((booking, index) => {
+        const payments = getBookingPaymentDetails(booking);
+        const paymentSummary = payments
+          .map((payment) => {
+            const label =
+              payment.methodLabel ||
+              CLINIC_PAYMENT_OPTIONS.find((opt) => opt.value === payment.method)
+                ?.label ||
+              String(payment.method || "غير محدد");
+            return `${label}: ${formatBookingAmount(payment.amount)} EGP`;
+          })
+          .join(" | ");
+        const transferPhones = payments
+          .filter((payment) => payment.transferFromPhone)
+          .map((payment) => {
+            const label =
+              payment.methodLabel ||
+              CLINIC_PAYMENT_OPTIONS.find((opt) => opt.value === payment.method)
+                ?.label ||
+              String(payment.method || "غير محدد");
+            return `${label}: ${payment.transferFromPhone}`;
+          })
+          .join(" | ");
+        const latestAction = getLatestAction(booking);
+        const latestUser = latestAction?.user;
+        const actionsSummary = (Array.isArray(booking.actions) ? booking.actions : [])
+          .map((action) => {
+            const fields = Array.isArray(action.metadata?.fields)
+              ? ` (${action.metadata.fields.join("، ")})`
+              : "";
+            return `${action.actionLabel || action.action || "إجراء"} - ${
+              action.user?.name || "مستخدم غير معروف"
+            } - ${formatExportDateTime(action.createdAt)}${fields}`;
+          })
+          .join(" | ");
+
+        return [
+          index + 1,
+          booking.customerName,
+          booking.customerPhone,
+          booking.age ?? "",
+          booking.slotDate || booking.appointmentDate?.slice(0, 10) || "",
+          formatBookingTime(booking),
+          getBookingTypeLabel(booking.bookingType),
+          getProcedureTypes(booking).join("، "),
+          getStatusLabel(booking.status),
+          getExaminationStatusLabel(booking.examinationStatus),
+          `${formatBookingAmount(booking.amountPaid)} EGP`,
+          paymentSummary,
+          transferPhones,
+          latestAction?.actionLabel || latestAction?.action || "",
+          latestUser
+            ? `${latestUser.name || "مستخدم"} (${getRoleLabel(latestUser.role)})`
+            : "",
+          actionsSummary,
+          formatExportDateTime(booking.createdAt),
+          formatExportDateTime(booking.updatedAt),
+        ];
+      });
+
+      downloadExcelFile(buildExcelHtml(rows));
+      toaster.create({
+        title: "تم تصدير الحجوزات",
+        description: `تم إنشاء ملف يحتوي على ${exportBookings.length} حجز.`,
+        type: "success",
+        duration: 2500,
+      });
+    } catch (error: any) {
+      toaster.create({
+        title: "فشل تصدير الحجوزات",
+        description:
+          error.response?.data?.message || "حدث خطأ أثناء تجهيز ملف الإكسل.",
+        type: "error",
+        duration: 3000,
+      });
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const renderPaginationControls = (placement: "top" | "bottom" = "bottom") => {
+    if (effectiveTotal === 0) return null;
+    const isBottom = placement === "bottom";
+    const pageNumbers: Array<number | "ellipsis-start" | "ellipsis-end"> =
+      totalPages <= 7
+        ? Array.from({ length: totalPages }, (_, i) => i + 1)
+        : [
+            1,
+            ...(safeCurrentPage > 4 ? (["ellipsis-start"] as const) : []),
+            ...Array.from(
+              new Set(
+                [
+                  safeCurrentPage - 1,
+                  safeCurrentPage,
+                  safeCurrentPage + 1,
+                ].filter((p) => p > 1 && p < totalPages),
+              ),
+            ),
+            ...(safeCurrentPage < totalPages - 3
+              ? (["ellipsis-end"] as const)
+              : []),
+            totalPages,
+          ];
+
+    return (
+      <Flex
+        className="no-print"
+        align={isBottom ? "stretch" : "center"}
+        justify="space-between"
+        gap={3}
+        p={isBottom ? 5 : 4}
+        borderTop={isBottom ? "1px solid" : undefined}
+        borderBottom={isBottom ? undefined : "1px solid"}
+        borderColor="gray.100"
+        bg={isBottom ? "#f9fafb" : "white"}
+        flexWrap="wrap"
+        direction={{ base: isBottom ? "column" : "row", md: "row" }}
+      >
+        <Box>
+          <Text fontSize={isBottom ? "md" : "sm"} color="gray.700" fontWeight="bold">
+            صفحة {safeCurrentPage} من {totalPages}
+          </Text>
+          <Text fontSize="xs" color="gray.500">
+            عرض {visibleStart} - {visibleEnd} من {effectiveTotal} حجز
+          </Text>
+        </Box>
+
+        <Flex
+          align="center"
+          gap={isBottom ? 3 : 2}
+          flexWrap="wrap"
+          justify={{ base: isBottom ? "space-between" : "flex-start", md: "flex-end" }}
+        >
+          <Flex align="center" gap={2}>
+            <Text fontSize="sm" color="gray.500">
+              في الصفحة
+            </Text>
+            <Box
+              bg="gray.50"
+              border="1px solid"
+              borderColor="gray.200"
+              borderRadius="lg"
+              px={1}
+            >
+              <select
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(Number(e.target.value) as typeof pageSize);
+                  setCurrentPage(1);
+                }}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  outline: "none",
+                  padding: "7px 8px",
+                  color: "#374151",
+                  fontSize: "14px",
+                }}
+              >
+                {PAGE_SIZE_OPTIONS.map((size) => (
+                  <option key={size} value={size}>
+                    {size}
+                  </option>
+                ))}
+              </select>
+            </Box>
+          </Flex>
+
+          <Flex
+            align="center"
+            gap={1.5}
+            bg={isBottom ? "white" : "transparent"}
+            border={isBottom ? "1px solid" : undefined}
+            borderColor="gray.200"
+            borderRadius="2xl"
+            p={isBottom ? 2 : 0}
+            shadow={isBottom ? "sm" : undefined}
+            flexWrap="wrap"
+            justify="center"
+          >
+            {isBottom && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={safeCurrentPage <= 1}
+                onClick={() => setCurrentPage(1)}
+              >
+                الأولى
+              </Button>
+            )}
+            <Button
+              size={isBottom ? "md" : "sm"}
+              variant="outline"
+              disabled={safeCurrentPage <= 1}
+              onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+            >
+              <ChevronRight size={16} />
+              السابق
+            </Button>
+            {pageNumbers.map((page) =>
+              typeof page === "number" ? (
+                <Button
+                  key={page}
+                  size={isBottom ? "md" : "sm"}
+                  minW={isBottom ? "42px" : "34px"}
+                  px={isBottom ? 3 : 2}
+                  variant={page === safeCurrentPage ? "solid" : "outline"}
+                  bg={page === safeCurrentPage ? "#666139" : undefined}
+                  color={page === safeCurrentPage ? "white" : undefined}
+                  _hover={{
+                    bg: page === safeCurrentPage ? "#555230" : "gray.50",
+                  }}
+                  onClick={() => setCurrentPage(page)}
+                >
+                  {page}
+                </Button>
+              ) : (
+                <Text key={page} px={1} color="gray.400" fontWeight="bold">
+                  …
+                </Text>
+              ),
+            )}
+            <Button
+              size={isBottom ? "md" : "sm"}
+              variant="outline"
+              disabled={safeCurrentPage >= totalPages}
+              onClick={() =>
+                setCurrentPage((page) => Math.min(totalPages, page + 1))
+              }
+            >
+              التالي
+              <ChevronLeft size={16} />
+            </Button>
+            {isBottom && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={safeCurrentPage >= totalPages}
+                onClick={() => setCurrentPage(totalPages)}
+              >
+                الأخيرة
+              </Button>
+            )}
+          </Flex>
+        </Flex>
+      </Flex>
     );
   };
 
@@ -736,7 +1853,7 @@ export default function TodayBookings() {
 
   const getExamCardTheme = (examinationStatus?: ExaminationStatus) => {
     if (examinationStatus === "done")
-      return { border: "green.200", bg: "#f4f3ed", accent: "#666139" };
+      return { border: "green.300", bg: "#ecfdf5", accent: "#16a34a" };
     if (examinationStatus === "waiting")
       return { border: "yellow.200", bg: "#fffbeb", accent: "#d97706" };
     return { border: "gray.200", bg: "white", accent: "#666139" };
@@ -896,6 +2013,19 @@ export default function TodayBookings() {
           {renderProcedureTags(booking, true)}
         </Box>
 
+        <Box
+          px={4}
+          py={3}
+          borderTop="1px solid"
+          borderColor="gray.100"
+          bg="whiteAlpha.800"
+        >
+          <Text fontSize="xs" color="gray.500" fontWeight="medium" mb={2}>
+            آخر إجراء
+          </Text>
+          {renderActionActor(booking, true)}
+        </Box>
+
         {/* المبلغ والإجراءات */}
         <Flex
           px={4}
@@ -915,7 +2045,7 @@ export default function TodayBookings() {
                 ج.م
               </Text>
             </Text>
-            <Box mt={1.5}>{renderPaymentBadge(booking)}</Box>
+            <Box mt={1.5}>{renderPaymentBadges(booking)}</Box>
           </Box>
           <Button
             size="sm"
@@ -990,6 +2120,17 @@ export default function TodayBookings() {
                 طباعة
               </Button>
               <Button
+                variant="ghost"
+                color="white"
+                _hover={{ bg: "whiteAlpha.200" }}
+                onClick={handleExportExcel}
+                loading={isExporting}
+                gap={2}
+              >
+                <Download size={18} />
+                تصدير Excel
+              </Button>
+              <Button
                 variant="outline"
                 borderColor="whiteAlpha.500"
                 color="white"
@@ -1052,31 +2193,53 @@ export default function TodayBookings() {
                   إجمالي الحجوزات
                 </Text>
                 <Text fontSize="2xl" fontWeight="bold" color="#666139">
-                  {filteredBookings.length}
+                  {effectiveTotal}
                 </Text>
               </Box>
             </Card.Body>
           </Card.Root>
           {showTotalIncome && (
             <Card.Root bg="white" shadow="md" borderRadius="xl" overflow="hidden">
-              <Card.Body
-                p={5}
-                display="flex"
-                flexDirection="row"
-                alignItems="center"
-                gap={4}
-              >
-                <Box p={3} bg="#f4f3ed" borderRadius="xl">
-                  <DollarSign size={24} color="#666139" />
-                </Box>
-                <Box>
-                  <Text fontSize="xs" color="gray.500" fontWeight="medium">
-                    إجمالي الدخل
-                  </Text>
-                  <Text fontSize="2xl" fontWeight="bold" color="#666139">
-                    {totalIncome.toFixed(2)} EGP
-                  </Text>
-                </Box>
+              <Card.Body p={5}>
+                <Flex align="center" gap={4}>
+                  <Box p={3} bg="#f4f3ed" borderRadius="xl">
+                    <DollarSign size={24} color="#666139" />
+                  </Box>
+                  <Box>
+                    <Text fontSize="xs" color="gray.500" fontWeight="medium">
+                      {activeServerPaginated ? "دخل الصفحة المعروضة" : "إجمالي الدخل"}
+                    </Text>
+                    <Text fontSize="2xl" fontWeight="bold" color="#666139">
+                      {formatBookingAmount(totalIncome)} EGP
+                    </Text>
+                  </Box>
+                </Flex>
+                {incomeByPaymentMethod.length > 0 && (
+                  <Box mt={4} pt={3} borderTop="1px solid" borderColor="gray.100">
+                    <Text fontSize="xs" color="gray.500" mb={2} fontWeight="medium">
+                      تفصيل حسب طريقة الدفع
+                    </Text>
+                    <Flex gap={2} flexWrap="wrap">
+                      {incomeByPaymentMethod.map((row) => (
+                        <Badge
+                          key={row.label}
+                          variant="subtle"
+                          bg="#f8f7ef"
+                          color="#615b36"
+                          border="1px solid"
+                          borderColor="#e8e4d4"
+                          px={2}
+                          py={1}
+                          rounded="lg"
+                          fontSize="xs"
+                          fontWeight="bold"
+                        >
+                          {row.label}: {formatBookingAmount(row.amount)} EGP
+                        </Badge>
+                      ))}
+                    </Flex>
+                  </Box>
+                )}
               </Card.Body>
             </Card.Root>
           )}
@@ -1264,42 +2427,76 @@ export default function TodayBookings() {
         >
           <Card.Body p={5}>
             <Flex
-              direction={{ base: "column", lg: "row" }}
+              direction="column"
               gap={4}
-              align={{ base: "stretch", lg: "center" }}
-              justify="space-between"
+              align="stretch"
             >
-              <Flex
-                gap={3}
-                direction={{ base: "column", sm: "row" }}
-                flex={1}
-                maxW={{ lg: "500px" }}
-              >
-                <Box position="relative" flex={1}>
-                  <Input
-                    placeholder="بحث بالاسم أو الهاتف..."
-                    bg="gray.50"
-                    pr={10}
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    size="md"
-                    borderRadius="xl"
-                    border="1px solid"
-                    borderColor="gray.200"
-                    _focus={{ borderColor: "#666139", bg: "white" }}
-                  />
-                  <Box
+              <Box w="full">
+                <Box position="relative" w="full">
+                <Input
+                  placeholder="اكتب اسم المريض أو رقم الهاتف للبحث..."
+                  bg="gray.50"
+                  pr={14}
+                  pl={searchQuery ? 24 : 5}
+                  value={searchQuery}
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  size="lg"
+                  h={{ base: "58px", md: "64px" }}
+                  fontSize={{ base: "md", md: "xl" }}
+                  fontWeight="medium"
+                  borderRadius="2xl"
+                  border="2px solid"
+                  borderColor={searchQuery ? "#b6b299" : "gray.200"}
+                  _focus={{
+                    borderColor: "#666139",
+                    bg: "white",
+                    boxShadow: "0 0 0 1px #666139",
+                  }}
+                />
+                <Box
+                  position="absolute"
+                  right={5}
+                  top="50%"
+                  transform="translateY(-50%)"
+                  color={searchQuery ? "#666139" : "gray.400"}
+                  pointerEvents="none"
+                >
+                  <Search size={24} />
+                </Box>
+                {searchQuery && (
+                  <Button
                     position="absolute"
-                    right={3}
+                    left={3}
                     top="50%"
                     transform="translateY(-50%)"
-                    color="gray.400"
+                    size="sm"
+                    variant="solid"
+                    bg="#666139"
+                    color="white"
+                    _hover={{ bg: "#555230" }}
+                    borderRadius="full"
+                    onClick={() => {
+                      setSearchQuery("");
+                      setDebouncedSearchQuery("");
+                      setCurrentPage(1);
+                    }}
                   >
-                    <Search size={18} />
-                  </Box>
+                    مسح
+                  </Button>
+                )}
                 </Box>
-              </Flex>
-              <Flex gap={2} wrap="wrap">
+                {liveSearchTerm && (
+                  <Text fontSize="sm" color="gray.600" mt={2} px={1}>
+                    البحث الحالي: {liveSearchTerm}
+                    {searchTerm !== liveSearchTerm ? " (جاري التحميل...)" : ""}
+                  </Text>
+                )}
+              </Box>
+
+              <Flex gap={2} wrap="wrap" justify="flex-start">
                 {canSelectDoctor && (
                   <Box
                     bg="gray.50"
@@ -1419,7 +2616,7 @@ export default function TodayBookings() {
                   ))}
                 </Flex>
                 <Flex bg="gray.50" p={1} rounded="xl" gap={1}>
-                  {(["all", "pending", "confirmed", "cancelled"] as const).map(
+                  {(["all", "pending", "cancelled"] as const).map(
                     (status) => (
                       <Button
                         key={status}
@@ -1438,10 +2635,8 @@ export default function TodayBookings() {
                         {status === "all"
                           ? "كل الحالات"
                           : status === "pending"
-                            ? "انتظار"
-                            : status === "confirmed"
-                              ? "مؤكد"
-                              : "ملغي"}
+                            ? "انتظار الكشف"
+                            : "ملغي"}
                       </Button>
                     )
                   )}
@@ -1465,9 +2660,11 @@ export default function TodayBookings() {
           </Flex>
         ) : (
           <Card.Root bg="white" shadow="md" borderRadius="xl" overflow="hidden">
+            {renderPaginationControls("top")}
+
             {/* Mobile Cards */}
             <Box display={{ base: "block", md: "none" }} p={4}>
-              {filteredBookings.length === 0 ? (
+              {effectiveTotal === 0 ? (
                 <Box py={16} textAlign="center">
                   <Users
                     size={48}
@@ -1483,8 +2680,11 @@ export default function TodayBookings() {
                 </Box>
               ) : (
                 <SimpleGrid columns={1} gap={3}>
-                  {filteredBookings.map((booking, index) =>
-                    renderMobileBookingCard(booking, index),
+                  {visibleBookings.map((booking, index) =>
+                    renderMobileBookingCard(
+                      booking,
+                      visibleStart + index - 1,
+                    ),
                   )}
                 </SimpleGrid>
               )}
@@ -1601,7 +2801,7 @@ export default function TodayBookings() {
                   </Table.Row>
                 </Table.Header>
                 <Table.Body>
-                  {filteredBookings.length === 0 ? (
+                  {effectiveTotal === 0 ? (
                     <Table.Row>
                       <Table.Cell colSpan={9} textAlign="center" py={16}>
                         <Users
@@ -1618,22 +2818,42 @@ export default function TodayBookings() {
                       </Table.Cell>
                     </Table.Row>
                   ) : (
-                    filteredBookings.map((booking, index) => (
-                      <Table.Row
-                        key={booking.id}
+                    visibleBookings.map((booking, index) => (
+                      <Fragment key={booking.id}>
+                        <Table.Row
                         bg={
-                          booking.isExtraBooking
-                            ? "orange.50"
-                            : getRowBg(booking.examinationStatus)
+                          booking.examinationStatus === "done"
+                            ? "#dcfce7"
+                            : booking.isExtraBooking
+                              ? "orange.50"
+                              : getRowBg(booking.examinationStatus)
                         }
+                        css={{
+                          "& > td": {
+                            background:
+                              booking.examinationStatus === "done"
+                                ? "#dcfce7"
+                                : booking.isExtraBooking
+                                  ? "var(--chakra-colors-orange-50)"
+                                  : undefined,
+                          },
+                        }}
                         _hover={{
-                          bg: booking.isExtraBooking
-                            ? "orange.100"
-                            : booking.examinationStatus === "done"
-                              ? "#e0decc"
+                          bg: booking.examinationStatus === "done"
+                            ? "#d1fae5"
+                            : booking.isExtraBooking
+                              ? "orange.100"
                               : booking.examinationStatus === "waiting"
                                 ? "yellow.100"
                                 : "gray.50",
+                          "& > td": {
+                            background:
+                              booking.examinationStatus === "done"
+                              ? "#d1fae5"
+                              : booking.isExtraBooking
+                                ? "var(--chakra-colors-orange-100)"
+                                : undefined,
+                          },
                         }}
                         cursor="pointer"
                         onClick={(e) => {
@@ -1649,7 +2869,7 @@ export default function TodayBookings() {
                         transition="background 0.15s"
                       >
                         <Table.Cell py={4} px={4} fontWeight="bold" color="#666139">
-                          {index + 1}
+                          {visibleStart + index}
                         </Table.Cell>
                         <Table.Cell py={4} px={4}>
                           <Flex align="center" gap={3}>
@@ -1705,7 +2925,7 @@ export default function TodayBookings() {
                             <Text fontWeight="bold" color="#666139">
                               {formatBookingAmount(booking.amountPaid)} EGP
                             </Text>
-                            {renderPaymentBadge(booking)}
+                            {renderPaymentBadges(booking)}
                           </Flex>
                         </Table.Cell>
                         <Table.Cell py={4} px={4}>
@@ -1721,7 +2941,34 @@ export default function TodayBookings() {
                           data-actions
                           onClick={(e) => e.stopPropagation()}
                         >
-                          <Flex gap={2}>
+                          <Flex gap={2} align="center">
+                            <Button
+                              size="xs"
+                              variant={
+                                expandedActionBookingId === booking.id
+                                  ? "solid"
+                                  : "outline"
+                              }
+                              bg={
+                                expandedActionBookingId === booking.id
+                                  ? "#666139"
+                                  : undefined
+                              }
+                              color={
+                                expandedActionBookingId === booking.id
+                                  ? "white"
+                                  : undefined
+                              }
+                              disabled={!getLatestAction(booking)}
+                              onClick={() =>
+                                setExpandedActionBookingId((current) =>
+                                  current === booking.id ? null : booking.id,
+                                )
+                              }
+                            >
+                              <CheckCircle size={14} />
+                              الإجراء
+                            </Button>
                             <IconButton
                               aria-label="تعديل"
                               size="sm"
@@ -1796,12 +3043,24 @@ export default function TodayBookings() {
                             </MenuRoot>
                           </Flex>
                         </Table.Cell>
-                      </Table.Row>
+                        </Table.Row>
+                        {expandedActionBookingId === booking.id && (
+                          <Table.Row>
+                            <Table.Cell colSpan={9} p={4} bg="#f8fafc">
+                              <SimpleGrid columns={{ base: 1, xl: 2 }} gap={4}>
+                                {renderBookingActionDetails(booking)}
+                                {renderPaymentDetailsPanel(booking)}
+                              </SimpleGrid>
+                            </Table.Cell>
+                          </Table.Row>
+                        )}
+                      </Fragment>
                     ))
                   )}
                 </Table.Body>
               </Table.Root>
             </Box>
+            {renderPaginationControls("bottom")}
           </Card.Root>
         )}
 
@@ -1811,7 +3070,7 @@ export default function TodayBookings() {
           css={{ "@media print": { display: "block", marginTop: "2rem" } }}
         >
           <Flex justify="space-between" borderTop="1px dashed gray" pt={4}>
-            <Text>إجمالي الحجوزات: {filteredBookings.length}</Text>
+            <Text>إجمالي الحجوزات: {effectiveTotal}</Text>
             <Text fontWeight="bold">
               إجمالي الدخل: {totalIncome.toFixed(2)} EGP
             </Text>

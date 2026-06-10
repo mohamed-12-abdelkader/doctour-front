@@ -4,7 +4,15 @@ import { Dialog, Button, Input, Text, VStack, Box, Portal, Flex } from '@chakra-
 import { useState, useEffect } from 'react'
 import api from '@/lib/axios'
 import { toaster } from '@/components/ui/toaster'
-import { doctorInfo } from '@/data/services'
+import { BOOKING_SERVICES, doctorInfo } from '@/data/services'
+
+function todayYmd(): string {
+    const d = new Date()
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${y}-${m}-${day}`
+}
 
 interface OnlineBookingModalProps {
     isOpen: boolean
@@ -14,6 +22,7 @@ interface OnlineBookingModalProps {
 export default function OnlineBookingModal({ isOpen, onClose }: OnlineBookingModalProps) {
     const [name, setName] = useState('')
     const [phone, setPhone] = useState('')
+    const [selectedServices, setSelectedServices] = useState<string[]>([])
     const [saving, setSaving] = useState(false)
     const [isSuccessOpen, setIsSuccessOpen] = useState(false)
 
@@ -21,25 +30,42 @@ export default function OnlineBookingModal({ isOpen, onClose }: OnlineBookingMod
         if (isOpen) {
             setName('')
             setPhone('')
+            setSelectedServices([BOOKING_SERVICES[0] ?? 'كشف'])
         }
     }, [isOpen])
+
+    const toggleService = (service: string) => {
+        setSelectedServices((prev) => {
+            if (prev.includes(service)) {
+                return prev.filter((item) => item !== service)
+            }
+            return [...prev, service]
+        })
+    }
 
     const handleSave = async () => {
         if (!name.trim() || !phone.trim()) {
             toaster.create({ title: 'أدخل الاسم ورقم الهاتف', type: 'warning', duration: 2000 })
             return
         }
+        if (selectedServices.length === 0) {
+            toaster.create({ title: 'اختر خدمة واحدة على الأقل', type: 'warning', duration: 2000 })
+            return
+        }
 
         setSaving(true)
         try {
-            // تاريخ اليوم يتبعت تلقائياً كـ preferredDate
-            const todayDate = new Date().toISOString().split('T')[0] // YYYY-MM-DD
-
-            await api.post('/bookings/online', {
+            const services = selectedServices.map((service) => service.trim()).filter(Boolean)
+            const payload: Record<string, unknown> = {
                 name: name.trim(),
                 phone: phone.trim(),
-                preferredDate: todayDate,
-            })
+                preferredDate: todayYmd(),
+                services,
+            }
+
+            if (services.length === 1) payload.visitType = services[0]
+
+            await api.post('/bookings/online', payload)
 
             toaster.create({
                 title: 'تم تقديم طلب الحجز بنجاح',
@@ -87,7 +113,7 @@ export default function OnlineBookingModal({ isOpen, onClose }: OnlineBookingMod
                             borderRadius="2xl"
                             overflow="hidden"
                             boxShadow="2xl"
-                            width={{ base: '95%', md: '400px' }}
+                            width={{ base: '95%', md: '560px' }}
                             outline="none"
                         >
                             {/* Header */}
@@ -146,6 +172,36 @@ export default function OnlineBookingModal({ isOpen, onClose }: OnlineBookingMod
                                     </Text>
                                 </Box>
 
+                                <Box>
+                                    <Text fontSize="sm" color="gray.600" mb={2}>
+                                        الخدمات المطلوبة <Text as="span" color="red.400">*</Text>
+                                    </Text>
+                                    <Flex wrap="wrap" gap={2}>
+                                        {BOOKING_SERVICES.map((service) => {
+                                            const selected = selectedServices.includes(service)
+                                            return (
+                                                <Button
+                                                    key={service}
+                                                    type="button"
+                                                    size="sm"
+                                                    variant={selected ? 'solid' : 'outline'}
+                                                    bg={selected ? '#615b36' : 'white'}
+                                                    color={selected ? 'white' : 'gray.700'}
+                                                    borderColor={selected ? '#615b36' : 'gray.300'}
+                                                    _hover={{ bg: selected ? '#4a452a' : 'gray.50' }}
+                                                    onClick={() => toggleService(service)}
+                                                    rounded="full"
+                                                >
+                                                    {service}
+                                                </Button>
+                                            )
+                                        })}
+                                    </Flex>
+                                    <Text fontSize="xs" color="gray.500" mt={2}>
+                                        المختار: {selectedServices.length > 0 ? selectedServices.join('، ') : 'لا توجد خدمات محددة'}
+                                    </Text>
+                                </Box>
+
                                 {/* Actions */}
                                 <Flex gap={3} mt={2}>
                                     <Button
@@ -154,7 +210,7 @@ export default function OnlineBookingModal({ isOpen, onClose }: OnlineBookingMod
                                         bg="#615b36" color="white"
                                         _hover={{ bg: '#4a452a' }}
                                         loading={saving}
-                                        disabled={!name.trim() || !phone.trim()}
+                                        disabled={!name.trim() || !phone.trim() || selectedServices.length === 0}
                                     >
                                         إرسال طلب الحجز
                                     </Button>

@@ -11,6 +11,7 @@ import api from '@/lib/axios'
 import { toaster } from '@/components/ui/toaster'
 import { canChooseDoctor, getCurrentDoctorId, getCurrentRole, setSelectedDoctorId } from '@/lib/doctor-context'
 import { WhatsAppCustomerLink } from '@/components/WhatsAppCustomerLink'
+import { getProcedureTypes, getVisitTypeLabel } from '@/lib/booking-display'
 
 const MotionRow = motion(Table.Row)
 
@@ -63,6 +64,17 @@ function formatTime12(timeStr: string): string {
     const minute = Number.isNaN(m) ? 0 : m
     const ampm = hour < 12 ? 'ص' : 'م'
     return `${hour12}:${String(minute).padStart(2, '0')} ${ampm}`
+}
+
+function getBookingServices(booking: Booking): string[] {
+    const procedures = getProcedureTypes(booking)
+    if (procedures.length > 0) return procedures
+    const visitTypeLabel = getVisitTypeLabel(booking.visitType)
+    return visitTypeLabel && visitTypeLabel !== '—' ? [visitTypeLabel] : []
+}
+
+function getBookingSortDate(booking: Booking): string {
+    return booking.appointmentDate || booking.preferredDate || booking.createdAt || booking.updatedAt || ''
 }
 
 export default function OnlineBookingsPage() {
@@ -226,20 +238,19 @@ export default function OnlineBookingsPage() {
             const phone = b.customerPhone || b.phoneNumber || '';
             // @ts-ignore
             const email = b.email || '';
+            const servicesText = getBookingServices(b).join(' ');
 
             const matchesSearch =
                 name.includes(searchQuery) ||
                 phone.includes(searchQuery) ||
-                email.includes(searchQuery);
+                email.includes(searchQuery) ||
+                servicesText.includes(searchQuery);
 
             // Backend handles status/date, so we just do search here
             return matchesSearch;
         }).sort((a, b) => {
-            // Sort by appointmentDate (newest first)
-            // @ts-ignore
-            const dateA = a.appointmentDate || a.bookingTime || '';
-            // @ts-ignore
-            const dateB = b.appointmentDate || b.bookingTime || '';
+            const dateA = getBookingSortDate(a);
+            const dateB = getBookingSortDate(b);
             return new Date(dateB).getTime() - new Date(dateA).getTime();
         })
     }, [bookings, searchQuery])
@@ -366,15 +377,44 @@ export default function OnlineBookingsPage() {
     const formatPreferredDateTime = (booking: Booking) => {
         // الأونلاين: بيستخدم preferredDate + preferredTime
         if (booking.preferredDate) {
-            const d = new Date(booking.preferredDate).toLocaleDateString('ar-EG')
-            const t = booking.preferredTime || '--:--'
-            return `${d} — ${t}`
+            const dateValue = /^\d{4}-\d{2}-\d{2}$/.test(booking.preferredDate)
+                ? `${booking.preferredDate}T12:00:00`
+                : booking.preferredDate
+            const d = new Date(dateValue).toLocaleDateString('ar-EG')
+            return booking.preferredTime ? `${d} — ${booking.preferredTime}` : d
         }
         // لو تم التأكيد (appointmentDate حُدِد)
         if (booking.appointmentDate) {
             return new Date(booking.appointmentDate).toLocaleString('ar-EG', { dateStyle: 'short', timeStyle: 'short' })
         }
         return 'لم يحدد بعد'
+    }
+
+    const serviceBadges = (booking: Booking) => {
+        const services = getBookingServices(booking)
+        if (services.length === 0) {
+            return <Text fontSize="xs" color="gray.400">غير محدد</Text>
+        }
+        return (
+            <Flex wrap="wrap" gap={1.5} justify="flex-end">
+                {services.map((service) => (
+                    <Badge
+                        key={`${booking.id}-${service}`}
+                        bg="#f4f3ed"
+                        color={BRAND.primary}
+                        border="1px solid"
+                        borderColor="#e6e1cb"
+                        borderRadius="full"
+                        px={2.5}
+                        py={0.5}
+                        fontSize="xs"
+                        fontWeight="semibold"
+                    >
+                        {service}
+                    </Badge>
+                ))}
+            </Flex>
+        )
     }
 
     /** قائمة تحديث الحالة — مشتركة بين الجدول والبطاقة */
@@ -878,6 +918,11 @@ export default function OnlineBookingsPage() {
                                                     )}
                                                 </Box>
 
+                                                <Box mb={3}>
+                                                    <Text fontSize="xs" color="gray.500" mb={1}>الخدمات المطلوبة</Text>
+                                                    {serviceBadges(booking)}
+                                                </Box>
+
                                                 <Box pt={3} borderTopWidth="1px" borderColor="gray.100">
                                                     <Text fontSize="xs" color="gray.500" mb={2}>تحديث الحالة</Text>
                                                     {bookingStatusSelect(booking, true)}
@@ -889,11 +934,12 @@ export default function OnlineBookingsPage() {
                             </Stack>
 
                             <Box display={{ base: 'none', md: 'block' }} overflowX="auto" css={{ WebkitOverflowScrolling: 'touch' }}>
-                                <Table.Root striped interactive minW="720px" size="sm">
+                                <Table.Root striped interactive minW="860px" size="sm">
                                     <Table.Header bg="gray.50">
                                         <Table.Row>
                                             <Table.ColumnHeader textAlign="right" py={3} px={4} fontSize="sm" color="gray.600" fontWeight="semibold">المريض</Table.ColumnHeader>
                                             <Table.ColumnHeader textAlign="right" py={3} px={4} fontSize="sm" color="gray.600" fontWeight="semibold">الاتصال</Table.ColumnHeader>
+                                            <Table.ColumnHeader textAlign="right" py={3} px={4} fontSize="sm" color="gray.600" fontWeight="semibold">الخدمات</Table.ColumnHeader>
                                             <Table.ColumnHeader textAlign="right" py={3} px={4} fontSize="sm" color="gray.600" fontWeight="semibold">الموعد المفضل</Table.ColumnHeader>
                                             <Table.ColumnHeader textAlign="right" py={3} px={4} fontSize="sm" color="gray.600" fontWeight="semibold">الحالة</Table.ColumnHeader>
                                             <Table.ColumnHeader textAlign="right" py={3} px={4} fontSize="sm" color="gray.600" fontWeight="semibold">تحديث الحالة</Table.ColumnHeader>
@@ -958,6 +1004,9 @@ export default function OnlineBookingsPage() {
                                                                     </Flex>
                                                                 )}
                                                             </VStack>
+                                                        </Table.Cell>
+                                                        <Table.Cell py={3} px={4}>
+                                                            {serviceBadges(booking)}
                                                         </Table.Cell>
                                                         <Table.Cell py={3} px={4}>
                                                             <Box>

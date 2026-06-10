@@ -16,24 +16,57 @@ export const CLINIC_PAYMENT_OPTIONS: {
 ];
 export type ExaminationStatus = 'waiting' | 'done';
 
+export interface BookingActionUser {
+    id?: number | string;
+    name?: string | null;
+    email?: string | null;
+    role?: string | null;
+}
+
+export interface BookingAction {
+    action?: string | null;
+    actionLabel?: string | null;
+    metadata?: {
+        fields?: string[];
+        [key: string]: unknown;
+    } | null;
+    user?: BookingActionUser | null;
+    createdAt?: string | null;
+}
+
 export interface Booking {
     id: number;
     customerName: string;
     customerPhone: string;
     doctorId?: number | null;
+    patientId?: number | null;
+    assignedBy?: number | null;
+    assignedByUser?: BookingActionUser | null;
+    actions?: BookingAction[];
     /** null للحجوزات الأونلاين المعلقة */
     appointmentDate: string | null;
+    /** تاريخ ووقت الحجز كما يرجعان من API سجل المريض */
+    slotDate?: string | null;
+    timeSlot?: string | null;
     bookingType: BookingType;
     amountPaid: string | number;
     paymentMethod?: ClinicPaymentMethod | null;
     paymentMethodLabel?: string | null;
+    paymentDetails?: Array<{
+        amount: number;
+        method: ClinicPaymentMethod;
+        methodLabel?: string | null;
+        transferFromPhone?: string | null;
+    }> | null;
+    transferFromPhone?: string | null;
+    clientRequestId?: string | null;
     status: BookingStatus;
     /** نوع الزيارة: checkup/followup/consultation أو اسم الخدمة من BOOKING_SERVICES */
     visitType?: VisitType | string;
     /** نوع الإجراء/الخدمة (clinic) — نص مجمّع */
     procedureType?: string | null;
     /** أنواع الإجراءات من الـ API */
-    procedureTypes?: string[];
+    procedureTypes?: string[] | null;
     appointmentTime?: string | null;
     appointmentTime24?: string | null;
     /** false = حجز لليوم بدون وقت محدد */
@@ -59,6 +92,7 @@ export interface Booking {
 export interface CreateClinicBookingData {
     name: string;
     phone: string;
+    age?: number;
     date: string;        // YYYY-MM-DD (الـ API بيتوقع date مش dateTime)
     /** اختياري: وقت الحجز (HH:mm) — يُرسل في حقل time حسب توثيق الـ API */
     time?: string;
@@ -69,6 +103,13 @@ export interface CreateClinicBookingData {
     doctorId?: number;
     amountPaid: number;
     paymentMethod: ClinicPaymentMethod;
+    transferFromPhone?: string;
+    payments?: Array<{
+        method: ClinicPaymentMethod;
+        amount: number;
+        transferFromPhone?: string;
+    }>;
+    clientRequestId?: string;
     /** أنواع الإجراء/الخدمة */
     procedureTypes?: string[];
     /** عدة أنواع — متابعة تُرسل كـ «إعادة» */
@@ -81,11 +122,19 @@ export interface CreateClinicBookingData {
 export interface UpdateBookingData {
     name?: string;
     phone?: string;
+    age?: number;
     date?: string;        // YYYY-MM-DD
     time?: string;
     doctorId?: number;
     amountPaid?: number;
     paymentMethod?: ClinicPaymentMethod;
+    transferFromPhone?: string;
+    payments?: Array<{
+        method: ClinicPaymentMethod;
+        amount: number;
+        transferFromPhone?: string;
+    }>;
+    procedureTypes?: string[];
     visitType?: VisitType | string;
     visitTypes?: string[];
 }
@@ -97,7 +146,10 @@ export interface CreateOnlineBookingData {
     doctorId?: number;
     preferredDate?: string;   // YYYY-MM-DD
     preferredTime?: string;   // HH:MM
-    visitType?: VisitType;
+    services?: string[];
+    procedureTypes?: string[];
+    visitTypes?: string[];
+    visitType?: VisitType | string;
 }
 
 // ─── Patient History ──────────────────────────────────────────────────────────

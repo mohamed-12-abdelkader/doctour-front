@@ -660,7 +660,8 @@ export default function MonthlyAccountsPage() {
         }
     }
 
-    const formatAmount = (n: number | string | null | undefined) => (typeof n === 'number' ? n : parseFloat(String(n ?? 0)) || 0).toFixed(2)
+    const formatAmount = (n: number | string | null | undefined) =>
+        Math.round(typeof n === 'number' ? n : parseFloat(String(n ?? 0)) || 0).toString()
     const formatDate = (d: string) => new Date(d).toLocaleDateString('ar-EG', { year: 'numeric', month: 'short', day: 'numeric' })
 
     const periodLabel = (() => {

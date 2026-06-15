@@ -85,6 +85,7 @@ import {
 } from "@/lib/doctor-context";
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200] as const;
+type BookingFilterStatus = "all" | "pending" | "examined" | "cancelled";
 
 function getInclusiveDateCount(start: string, end: string): number {
   const startTime = new Date(`${start}T00:00:00`).getTime();
@@ -110,9 +111,7 @@ export default function TodayBookings() {
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
   const [filterType, setFilterType] = useState<"all" | BookingType>("all");
-  const [filterStatus, setFilterStatus] = useState<"all" | BookingStatus>(
-    "all"
-  );
+  const [filterStatus, setFilterStatus] = useState<BookingFilterStatus>("all");
   const [filterProcedure, setFilterProcedure] = useState<string>("all");
   const [filterPaymentMethod, setFilterPaymentMethod] =
     useState<PaymentFilterValue>("all");
@@ -135,6 +134,8 @@ export default function TodayBookings() {
   const [canSelectDoctor, setCanSelectDoctor] = useState(false);
   const [canManageExamination, setCanManageExamination] = useState(false);
   const [showTotalIncome, setShowTotalIncome] = useState(false);
+  const [incomeBookings, setIncomeBookings] = useState<Booking[] | null>(null);
+  const [isIncomeLoading, setIsIncomeLoading] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(
     25,
@@ -200,6 +201,26 @@ export default function TodayBookings() {
     }, 300);
     return () => window.clearTimeout(id);
   }, [searchQuery]);
+
+  const buildAllBookingsParams = (limit = 10000) => {
+    const params: any = {
+      page: 1,
+      limit,
+    };
+
+    if (filterType !== "all") params.type = filterType;
+    if (filterStatus === "cancelled") params.status = filterStatus;
+
+    if (rangeStart === rangeEnd) {
+      params.date = rangeStart;
+    } else {
+      params.startDate = rangeStart;
+      params.endDate = rangeEnd;
+    }
+    if (selectedDoctorId) params.doctorId = selectedDoctorId;
+
+    return params;
+  };
 
   const fetchBookings = async (silent = false) => {
     if (!silent) setIsLoading(true);
@@ -319,6 +340,56 @@ export default function TodayBookings() {
     canUseServerPagination,
   ]);
 
+  useEffect(() => {
+    if (!showTotalIncome || !activeServerPaginated) {
+      setIncomeBookings(null);
+      setIsIncomeLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    const loadIncomeBookings = async () => {
+      setIsIncomeLoading(true);
+      try {
+        const response = await api.get("/bookings/all", {
+          params: buildAllBookingsParams(10000),
+        });
+        if (cancelled) return;
+        const data = response.data;
+        const nextBookings = Array.isArray(data) ? data : (data.bookings ?? []);
+        setIncomeBookings(Array.isArray(nextBookings) ? nextBookings : []);
+      } catch (error: any) {
+        if (!cancelled) {
+          setIncomeBookings([]);
+          toaster.create({
+            title: "تعذر حساب إجمالي الدخل",
+            description:
+              error.response?.data?.message ||
+              "حدث خطأ أثناء جلب كل الحجوزات لحساب الرصيد.",
+            type: "error",
+            duration: 3000,
+          });
+        }
+      } finally {
+        if (!cancelled) setIsIncomeLoading(false);
+      }
+    };
+
+    void loadIncomeBookings();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    showTotalIncome,
+    activeServerPaginated,
+    filterType,
+    filterStatus,
+    rangeStart,
+    rangeEnd,
+    selectedDoctorId,
+  ]);
+
   // Calendar helpers
   const calYear = calViewDate.getFullYear();
   const calMonth = calViewDate.getMonth();
@@ -404,6 +475,13 @@ export default function TodayBookings() {
           booking.status !== "cancelled" &&
           booking.status !== "rejected",
       );
+    } else if (filterStatus === "examined") {
+      list = list.filter(
+        ({ booking }) =>
+          booking.examinationStatus === "done" &&
+          booking.status !== "cancelled" &&
+          booking.status !== "rejected",
+      );
     } else if (filterStatus === "cancelled") {
       list = list.filter(({ booking }) => booking.status === "cancelled");
     }
@@ -414,7 +492,7 @@ export default function TodayBookings() {
     return list
       .filter(({ searchText }) => searchText.includes(searchLower))
       .map(({ booking }) => booking);
-  }, [indexedBookings, liveSearchTerm, filterProcedure, filterPaymentMethod]);
+  }, [indexedBookings, liveSearchTerm, filterStatus, filterProcedure, filterPaymentMethod]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -464,16 +542,21 @@ export default function TodayBookings() {
     [indexedBookings],
   );
 
+  const incomeSourceBookings =
+    activeServerPaginated && showTotalIncome
+      ? (incomeBookings ?? [])
+      : filteredBookings;
+
   const totalIncome = useMemo(() => {
     if (!showTotalIncome) return 0;
-    return filteredBookings.reduce((sum, b) => {
+    return incomeSourceBookings.reduce((sum, b) => {
       const amount =
         typeof b.amountPaid === "string"
           ? parseFloat(b.amountPaid)
           : b.amountPaid;
       return sum + (amount || 0);
     }, 0);
-  }, [filteredBookings, showTotalIncome]);
+  }, [incomeSourceBookings, showTotalIncome]);
 
   const incomeByPaymentMethod = useMemo(() => {
     if (!showTotalIncome) return [];
@@ -482,7 +565,7 @@ export default function TodayBookings() {
       { label: string; amount: number }
     >();
 
-    for (const booking of filteredBookings) {
+    for (const booking of incomeSourceBookings) {
       const details = Array.isArray(booking.paymentDetails)
         ? booking.paymentDetails
         : [];
@@ -516,7 +599,7 @@ export default function TodayBookings() {
     }
 
     return Array.from(map.values()).filter((row) => row.amount > 0);
-  }, [filteredBookings, showTotalIncome]);
+  }, [incomeSourceBookings, showTotalIncome]);
 
   function buildClinicPayload(
     data: CreateClinicBookingData,
@@ -1448,6 +1531,13 @@ export default function TodayBookings() {
           booking.status !== "cancelled" &&
           booking.status !== "rejected",
       );
+    } else if (filterStatus === "examined") {
+      list = list.filter(
+        ({ booking }) =>
+          booking.examinationStatus === "done" &&
+          booking.status !== "cancelled" &&
+          booking.status !== "rejected",
+      );
     } else if (filterStatus === "cancelled") {
       list = list.filter(({ booking }) => booking.status === "cancelled");
     }
@@ -2207,14 +2297,28 @@ export default function TodayBookings() {
                   </Box>
                   <Box>
                     <Text fontSize="xs" color="gray.500" fontWeight="medium">
-                      {activeServerPaginated ? "دخل الصفحة المعروضة" : "إجمالي الدخل"}
+                      إجمالي الدخل
                     </Text>
-                    <Text fontSize="2xl" fontWeight="bold" color="#666139">
-                      {formatBookingAmount(totalIncome)} EGP
-                    </Text>
+                    {isIncomeLoading ? (
+                      <Flex align="center" gap={2} color="#666139" mt={1}>
+                        <Spinner size="sm" />
+                        <Text fontSize="sm" fontWeight="bold">
+                          جاري حساب كل الحجوزات...
+                        </Text>
+                      </Flex>
+                    ) : (
+                      <>
+                        <Text fontSize="2xl" fontWeight="bold" color="#666139">
+                          {formatBookingAmount(totalIncome)} EGP
+                        </Text>
+                        <Text fontSize="xs" color="gray.500">
+                          محسوب على {incomeSourceBookings.length} حجز
+                        </Text>
+                      </>
+                    )}
                   </Box>
                 </Flex>
-                {incomeByPaymentMethod.length > 0 && (
+                {!isIncomeLoading && incomeByPaymentMethod.length > 0 && (
                   <Box mt={4} pt={3} borderTop="1px solid" borderColor="gray.100">
                     <Text fontSize="xs" color="gray.500" mb={2} fontWeight="medium">
                       تفصيل حسب طريقة الدفع
@@ -2616,7 +2720,7 @@ export default function TodayBookings() {
                   ))}
                 </Flex>
                 <Flex bg="gray.50" p={1} rounded="xl" gap={1}>
-                  {(["all", "pending", "cancelled"] as const).map(
+                  {(["all", "pending", "examined", "cancelled"] as const).map(
                     (status) => (
                       <Button
                         key={status}
@@ -2636,6 +2740,8 @@ export default function TodayBookings() {
                           ? "كل الحالات"
                           : status === "pending"
                             ? "انتظار الكشف"
+                            : status === "examined"
+                              ? "تم الكشف"
                             : "ملغي"}
                       </Button>
                     )

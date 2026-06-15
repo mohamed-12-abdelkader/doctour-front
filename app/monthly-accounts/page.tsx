@@ -20,34 +20,28 @@ import {
     Textarea,
     Tabs,
     IconButton,
+    Badge,
 } from '@chakra-ui/react'
-import { useState, useEffect, useMemo, type ReactNode } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import {
     Plus,
     Calendar,
-    Wallet,
-    TrendingUp,
     TrendingDown,
-    DollarSign,
     FileText,
-    Receipt,
     Layers,
     Trash2,
     RefreshCw,
-    Info,
-    Stethoscope,
     ChevronDown,
+    CheckCircle,
+    AlertTriangle,
+    Search,
+    Download,
 } from 'lucide-react'
 import {
-    BookingsIncomeResponse,
-    ManualIncomeResponse,
     ExpensesResponse,
-    AccountsSummaryResponse,
-    AddIncomeBody,
     AddExpenseBody,
     ExpenseCategory,
     ExpenseSubcategory,
-    BookingIncomeByDoctorRow,
 } from '@/types/accounts'
 import api from '@/lib/axios'
 import { toaster } from '@/components/ui/toaster'
@@ -59,6 +53,26 @@ function getCurrentMonth(): string {
 function getToday(): string {
     const d = new Date()
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function formatDateInputValue(d: Date): string {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function getWeekRange(dateStr: string): { startDate: string; endDate: string } | null {
+    if (!dateStr) return null
+    const d = new Date(`${dateStr}T12:00:00`)
+    if (Number.isNaN(d.getTime())) return null
+    const day = d.getDay()
+    const diffToMonday = (day + 6) % 7
+    const start = new Date(d)
+    start.setDate(d.getDate() - diffToMonday)
+    const end = new Date(start)
+    end.setDate(start.getDate() + 6)
+    return {
+        startDate: formatDateInputValue(start),
+        endDate: formatDateInputValue(end),
+    }
 }
 
 /** تنسيق تاريخ مع اسم اليوم: "السبت 1 فبراير 2026" */
@@ -144,102 +158,145 @@ function messageFromApi(error: unknown, fallback: string): string {
     return typeof m === 'string' && m.trim() ? m.trim() : fallback
 }
 
-function doctorRowLabel(row: BookingIncomeByDoctorRow): string {
-    if (row.doctorId == null) return 'بدون طبيب'
-    const n = row.doctorName?.trim()
-    return n || `طبيب #${row.doctorId}`
+type PeriodMode = 'day' | 'week' | 'month' | 'days' | 'months'
+type FinancialPaymentStatus =
+    | 'all'
+    | 'paid'
+    | 'unpaid'
+    | 'partial'
+    | 'overpaid'
+    | 'zero_due'
+    | 'outstanding'
+    | 'with_payment'
+    | 'without_payment'
+type FinancialPaymentMethod = 'all' | 'cash' | 'vodafone_cash' | 'instapay' | 'visa'
+
+interface FinancialDoctorRow {
+    doctorId?: number | null
+    doctorName?: string
+    specialty?: string
+    phone?: string
+    grossIncome?: number
+    totalCollected?: number
+    totalOutstanding?: number
+    totalBookings?: number
+    casesWithPayments?: number
+    casesWithoutPayments?: number
+    fullyPaidCases?: number
+    outstandingCases?: number
+    partialCases?: number
+    overpaidCases?: number
 }
 
-/** بطاقة قسم دخل — مغلقة افتراضيًا، اضغط الرأس لفتح المحتوى */
-function CollapsibleIncomeSection({
-    open,
-    onOpenChange,
-    icon,
-    title,
-    subtitle,
-    totalText,
-    headerAction,
-    children,
-    mb,
-}: {
-    open: boolean
-    onOpenChange: (open: boolean) => void
-    icon: ReactNode
-    title: string
-    subtitle?: string
-    totalText?: string | null
-    headerAction?: ReactNode
-    children: ReactNode
-    mb?: number | string
-}) {
-    return (
-        <Card.Root bg="white" shadow="md" borderRadius="xl" overflow="hidden" mb={mb}>
-            <Card.Header
-                bg="#fdfbf7"
-                borderBottom={open ? '1px solid' : 'none'}
-                borderColor="gray.100"
-                p={0}
-            >
-                <Flex align="stretch" gap={0} flexWrap="wrap">
-                    <Button
-                        variant="ghost"
-                        flex={1}
-                        minW={0}
-                        w="100%"
-                        h="auto"
-                        py={4}
-                        px={5}
-                        borderRadius="0"
-                        fontWeight="normal"
-                        justifyContent="flex-start"
-                        onClick={() => onOpenChange(!open)}
-                        aria-expanded={open}
-                        _hover={{ bg: '#f5f2eb' }}
-                    >
-                        <Flex justify="space-between" align="start" gap={3} width="100%">
-                            <Box flex={1} minW={0}>
-                                <Heading size="md" color="#615b36" display="flex" alignItems="center" gap={2}>
-                                    {icon}
-                                    {title}
-                                </Heading>
-                                {subtitle && (
-                                    <Text fontSize="sm" color="gray.500" mt={1} fontWeight="normal">
-                                        {subtitle}
-                                    </Text>
-                                )}
-                                {totalText && (
-                                    <Text fontSize="sm" fontWeight="bold" color="#615b36" mt={2}>
-                                        {totalText}
-                                    </Text>
-                                )}
-                                <Text fontSize="xs" color="gray.400" mt={2}>
-                                    {open ? '▲ اضغط لإخفاء التفاصيل' : '▼ اضغط لفتح التفاصيل'}
-                                </Text>
-                            </Box>
-                            <Box
-                                color="#615b36"
-                                flexShrink={0}
-                                mt={1}
-                                transform={open ? 'rotate(180deg)' : undefined}
-                                transition="transform 0.2s"
-                                aria-hidden
-                            >
-                                <ChevronDown size={22} />
-                            </Box>
-                        </Flex>
-                    </Button>
-                    {headerAction}
-                </Flex>
-            </Card.Header>
-            {open ? <Card.Body p={5}>{children}</Card.Body> : null}
-        </Card.Root>
-    )
+interface FinancialTrendRow {
+    periodStart?: string
+    bookingCount?: number
+    grossIncome?: number
+    totalCollected?: number
+    totalOutstanding?: number
 }
 
-type PeriodMode = 'month' | 'days' | 'months'
+interface FinancialReportResponse {
+    period?: {
+        type?: string
+        startDate?: string
+        endDate?: string
+        label?: string
+    }
+    cards?: {
+        totalIncome?: number
+        totalPayments?: number
+        totalOutstanding?: number
+        totalBookings?: number
+        paidCases?: number
+        unpaidCases?: number
+    }
+    summary?: {
+        grossIncome?: number
+        totalCollected?: number
+        totalOutstanding?: number
+        paymentBreakdownMatchesCollected?: boolean
+        paymentBreakdown?: Array<{
+            method?: string
+            label?: string
+            amount?: number
+            count?: number
+        }>
+        byDoctor?: FinancialDoctorRow[]
+    }
+    charts?: {
+        paymentMethodDistribution?: Array<{
+            method?: string
+            label?: string
+            amount?: number
+            count?: number
+        }>
+        dailyIncome?: FinancialTrendRow[]
+        weeklyIncome?: FinancialTrendRow[]
+        monthlyIncome?: FinancialTrendRow[]
+        doctorIncomeDistribution?: FinancialDoctorRow[]
+    }
+    validation?: {
+        isBalanced?: boolean
+        checks?: Record<string, boolean>
+        excludedCancelledOrRejectedBookings?: number
+        anomalies?: Record<string, number>
+    }
+}
+
+interface FinancialCaseRow {
+    bookingId: number
+    patientName: string
+    phone?: string
+    bookingDate?: string
+    service?: string
+    bookingValue?: number
+    totalAmount?: number
+    amountPaid?: number
+    remainingAmount?: number
+    paymentStatus?: string
+    paymentStatusLabel?: string
+    paymentMethods?: Array<{
+        method?: string
+        label?: string
+        amount?: number
+        transferFromPhone?: string
+    }>
+    doctorId?: number
+    doctorName?: string
+    doctorSpecialty?: string
+}
+
+interface FinancialCasesResponse {
+    total?: number
+    page?: number
+    limit?: number
+    totalPages?: number
+    cases?: FinancialCaseRow[]
+}
+
+const validationCheckLabels: Record<string, string> = {
+    cancelledBookingsExcluded: 'استبعاد الملغي والمرفوض',
+    paymentMethodsMatchCollected: 'وسائل الدفع تطابق المحصل',
+    noPaymentAmountMismatch: 'لا يوجد اختلاف في مبالغ الدفع',
+    noMissingPaymentMethodForPaidBookings: 'لا يوجد دفع بدون وسيلة دفع',
+    noOverpaidBookings: 'لا توجد مدفوعات زائدة',
+    noNegativeAmounts: 'لا توجد قيم سالبة',
+    noDuplicatePaymentCandidates: 'لا توجد احتمالات تكرار دفع',
+}
+
+const validationAnomalyLabels: Record<string, string> = {
+    paymentMismatchCount: 'اختلافات مبالغ الدفع',
+    missingPaymentMethodCount: 'مدفوعات بدون وسيلة',
+    overpaidCount: 'مدفوعات زائدة',
+    negativeAmountCount: 'قيم سالبة',
+    duplicatePaymentCandidateCount: 'احتمالات تكرار دفع',
+}
 
 export default function MonthlyAccountsPage() {
     const [periodMode, setPeriodMode] = useState<PeriodMode>('month')
+    const [dayDate, setDayDate] = useState<string>(getToday())
+    const [weekDate, setWeekDate] = useState<string>(getToday())
     const [month, setMonth] = useState<string>(getCurrentMonth())
     const [startDate, setStartDate] = useState<string>(() => {
         const d = new Date()
@@ -250,38 +307,25 @@ export default function MonthlyAccountsPage() {
     const [startMonth, setStartMonth] = useState<string>(getCurrentMonth())
     const [endMonth, setEndMonth] = useState<string>(getCurrentMonth())
 
-    const [summary, setSummary] = useState<AccountsSummaryResponse | null>(null)
-    const [bookingsIncome, setBookingsIncome] = useState<BookingsIncomeResponse | null>(null)
-    const [manualIncome, setManualIncome] = useState<ManualIncomeResponse | null>(null)
     const [expenses, setExpenses] = useState<ExpensesResponse | null>(null)
+    const [financialReport, setFinancialReport] = useState<FinancialReportResponse | null>(null)
+    const [financialCases, setFinancialCases] = useState<FinancialCasesResponse | null>(null)
     const [isLoading, setIsLoading] = useState(true)
-    const [incomeSaving, setIncomeSaving] = useState(false)
+    const [isFinancialCasesLoading, setIsFinancialCasesLoading] = useState(false)
+    const [isExportingFinancialReport, setIsExportingFinancialReport] = useState(false)
     const [expenseSaving, setExpenseSaving] = useState(false)
 
-    const { open: isIncomeOpen, onOpen: onIncomeOpen, onClose: onIncomeClose } = useDisclosure()
     const { open: isExpenseOpen, onOpen: onExpenseOpen, onClose: onExpenseClose } = useDisclosure()
 
-    const [filterProcedure, setFilterProcedure] = useState<string>('all')
     const [filterExpenseCat, setFilterExpenseCat] = useState<string>('all')
     const [bookingsByDoctorOpen, setBookingsByDoctorOpen] = useState(false)
-    const [bookingsSectionOpen, setBookingsSectionOpen] = useState(false)
-    const [manualIncomeSectionOpen, setManualIncomeSectionOpen] = useState(false)
-
-    const filteredBookingsIncome = useMemo(() => {
-        if (!bookingsIncome?.byCustomer) return []
-        if (filterProcedure === 'all') return bookingsIncome.byCustomer
-        // @ts-ignore
-        if (filterProcedure === 'none') return bookingsIncome.byCustomer.filter(r => !r.procedureType)
-            // @ts-ignore
-        return bookingsIncome.byCustomer.filter(r => r.procedureType === filterProcedure)
-    }, [bookingsIncome, filterProcedure])
-    
-    const bookingsProceduresList = useMemo(() => {
-        if (!bookingsIncome?.byCustomer) return []
-        // @ts-ignore
-        const pros = bookingsIncome.byCustomer.map(r => r.procedureType).filter(Boolean) as string[]
-        return Array.from(new Set(pros)).sort()
-    }, [bookingsIncome])
+    const [financialReportOpen, setFinancialReportOpen] = useState(false)
+    const [financialSearch, setFinancialSearch] = useState('')
+    const [financialPaymentStatus, setFinancialPaymentStatus] =
+        useState<FinancialPaymentStatus>('all')
+    const [financialPaymentMethod, setFinancialPaymentMethod] =
+        useState<FinancialPaymentMethod>('all')
+    const [financialCasesPage, setFinancialCasesPage] = useState(1)
 
     const filteredExpenses = useMemo(() => {
         if (!expenses?.expenses) return []
@@ -298,11 +342,6 @@ export default function MonthlyAccountsPage() {
         return Array.from(new Set(cats)).sort()
     }, [expenses])
 
-    const [incomeForm, setIncomeForm] = useState<AddIncomeBody>({
-        description: '',
-        amount: 0,
-        entryDate: getToday(),
-    })
     const [expenseForm, setExpenseForm] = useState<AddExpenseBody>({
         description: '',
         amount: 0,
@@ -323,13 +362,43 @@ export default function MonthlyAccountsPage() {
     const [creatingSubFor, setCreatingSubFor] = useState<number | null>(null)
     const [deletingId, setDeletingId] = useState<{ kind: 'cat' | 'sub'; id: number } | null>(null)
 
-    /** معاملات الفترة — مطابقة لـ getPeriodRange في الـ backend (doc §3) */
+    /** معاملات الفترة للواجهات القديمة مثل المصروفات. */
     const periodParams = useMemo(() => {
+        if (periodMode === 'day') return dayDate ? { startDate: dayDate, endDate: dayDate } : {}
+        if (periodMode === 'week') {
+            const range = getWeekRange(weekDate)
+            return range ?? {}
+        }
         if (periodMode === 'month') return month ? { month } : {}
         if (periodMode === 'days') return startDate && endDate ? { startDate, endDate } : {}
         if (periodMode === 'months') return startMonth && endMonth ? { startMonth, endMonth } : {}
         return {}
-    }, [periodMode, month, startDate, endDate, startMonth, endMonth])
+    }, [periodMode, dayDate, weekDate, month, startDate, endDate, startMonth, endMonth])
+
+    const financialPeriodParams = useMemo(() => {
+        if (periodMode === 'day') return dayDate ? { date: dayDate } : {}
+        if (periodMode === 'week') return weekDate ? { period: 'week', date: weekDate } : {}
+        if (periodMode === 'month') return month ? { month } : {}
+        if (periodMode === 'days') return startDate && endDate ? { startDate, endDate } : {}
+        if (periodMode === 'months' && startMonth && endMonth) {
+            const [endYear, endMonthNumber] = endMonth.split('-').map(Number)
+            const lastDay = new Date(endYear, endMonthNumber, 0).getDate()
+            return {
+                startDate: `${startMonth}-01`,
+                endDate: `${endMonth}-${String(lastDay).padStart(2, '0')}`,
+            }
+        }
+        return {}
+    }, [periodMode, dayDate, weekDate, month, startDate, endDate, startMonth, endMonth])
+
+    const financialCasesPeriodParams = useMemo(() => {
+        if (periodMode === 'day') return dayDate ? { date: dayDate } : {}
+        if (periodMode === 'week') {
+            const range = getWeekRange(weekDate)
+            return range ?? {}
+        }
+        return financialPeriodParams
+    }, [periodMode, dayDate, weekDate, financialPeriodParams])
 
     /** أولوية الـ backend: نطاق أيام صالح | نطاق شهور صالح | غير ذلك شهر واحد (أو الشهر الحالي إن لم يُرسل month) */
     const periodValidationError = useMemo(() => {
@@ -342,26 +411,62 @@ export default function MonthlyAccountsPage() {
         return null
     }, [periodMode, startDate, endDate, startMonth, endMonth])
 
+    const fetchFinancialCases = async (page = financialCasesPage) => {
+        if (periodValidationError) return
+        setIsFinancialCasesLoading(true)
+        try {
+            const params: Record<string, string | number> = {
+                page,
+                limit: 25,
+                sortBy: 'bookingDate',
+                sortDir: 'desc',
+            }
+            for (const [key, value] of Object.entries(financialCasesPeriodParams)) {
+                if (value != null) params[key] = value
+            }
+            if (financialPaymentStatus !== 'all') params.paymentStatus = financialPaymentStatus
+            if (financialPaymentMethod !== 'all') params.paymentMethod = financialPaymentMethod
+            if (financialSearch.trim()) params.search = financialSearch.trim()
+
+            const res = await api.get<FinancialCasesResponse>('/accounts/financial-report/cases', {
+                params,
+            })
+            setFinancialCases(res.data)
+        } catch (error: unknown) {
+            setFinancialCases(null)
+            toaster.create({
+                title: 'خطأ في جلب جدول الحالات المالي',
+                description: messageFromApi(error, 'حدث خطأ أثناء جلب الحالات'),
+                type: 'error',
+                duration: 3000,
+            })
+        } finally {
+            setIsFinancialCasesLoading(false)
+        }
+    }
+
     const fetchAll = async () => {
         if (periodValidationError) return
         setIsLoading(true)
         try {
             await api.get<{ message?: string }>('/accounts')
-            const [summaryRes, bookingsRes, manualRes, expensesRes] = await Promise.all([
-                api.get<AccountsSummaryResponse>('/accounts/summary', { params: periodParams }),
-                api.get<BookingsIncomeResponse>('/accounts/income/bookings', { params: periodParams }),
-                api.get<ManualIncomeResponse>('/accounts/income/manual', { params: periodParams }),
+            const [expensesRes, financialReportRes, financialCasesRes] = await Promise.all([
                 api.get<ExpensesResponse>('/accounts/expenses', { params: periodParams }),
+                api.get<FinancialReportResponse>('/accounts/financial-report', {
+                    params: financialPeriodParams,
+                }),
+                api.get<FinancialCasesResponse>('/accounts/financial-report/cases', {
+                    params: { ...financialCasesPeriodParams, page: 1, limit: 25, sortBy: 'bookingDate', sortDir: 'desc' },
+                }),
             ])
-            setSummary(summaryRes.data)
-            setBookingsIncome(bookingsRes.data)
-            setManualIncome(manualRes.data)
             setExpenses(expensesRes.data)
+            setFinancialReport(financialReportRes.data)
+            setFinancialCases(financialCasesRes.data)
+            setFinancialCasesPage(1)
         } catch (error: unknown) {
-            setSummary(null)
-            setBookingsIncome(null)
-            setManualIncome(null)
             setExpenses(null)
+            setFinancialReport(null)
+            setFinancialCases(null)
             const status = (error as { response?: { status?: number } })?.response?.status
             const title =
                 status === 401
@@ -388,7 +493,13 @@ export default function MonthlyAccountsPage() {
         }
         fetchAll()
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [periodMode, month, startDate, endDate, startMonth, endMonth, periodValidationError])
+    }, [periodMode, dayDate, weekDate, month, startDate, endDate, startMonth, endMonth, periodValidationError])
+
+    useEffect(() => {
+        if (periodValidationError || isLoading) return
+        void fetchFinancialCases(financialCasesPage)
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [financialPaymentStatus, financialPaymentMethod, financialSearch, financialCasesPage])
 
     const loadSubsMap = async (list: ExpenseCategory[]) => {
         if (list.length === 0) {
@@ -581,7 +692,6 @@ export default function MonthlyAccountsPage() {
         if (isExpenseOpen) {
             void fetchCategoriesLight()
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isExpenseOpen])
 
     useEffect(() => {
@@ -591,35 +701,6 @@ export default function MonthlyAccountsPage() {
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [expenseCategories])
-
-    const handleAddIncome = async () => {
-        if (!incomeForm.description?.trim() || incomeForm.amount <= 0) {
-            toaster.create({ title: 'أدخل الوصف والمبلغ', type: 'warning', duration: 2000 })
-            return
-        }
-        setIncomeSaving(true)
-        try {
-            await api.post('/accounts/income', {
-                description: incomeForm.description.trim(),
-                amount: incomeForm.amount,
-                entryDate: incomeForm.entryDate || undefined,
-            })
-            toaster.create({ title: 'تم إضافة الدخل بنجاح', type: 'success', duration: 2000 })
-            onIncomeClose()
-            setIncomeForm({ description: '', amount: 0, entryDate: getToday() })
-            fetchAll()
-        } catch (error: unknown) {
-            const status = (error as { response?: { status?: number } })?.response?.status
-            toaster.create({
-                title: status === 400 ? 'بيانات غير صالحة' : 'خطأ في إضافة الدخل',
-                description: messageFromApi(error, 'حدث خطأ'),
-                type: 'error',
-                duration: 3000,
-            })
-        } finally {
-            setIncomeSaving(false)
-        }
-    }
 
     const handleAddExpense = async () => {
         if (!expenseForm.description?.trim() || expenseForm.amount <= 0 || !expenseForm.category_id || !expenseForm.subcategory_id) {
@@ -660,19 +741,123 @@ export default function MonthlyAccountsPage() {
         }
     }
 
+    const handleExportFinancialReport = async (format: 'excel' | 'pdf' | 'print' = 'excel') => {
+        setIsExportingFinancialReport(true)
+        try {
+            const res = await api.get('/accounts/financial-report/export', {
+                params: { ...financialPeriodParams, format },
+                responseType: 'blob',
+            })
+            const mime =
+                format === 'pdf'
+                    ? 'application/pdf'
+                    : format === 'print'
+                      ? 'text/html'
+                      : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            const blob = new Blob([res.data], { type: mime })
+            const url = URL.createObjectURL(blob)
+            if (format === 'print') {
+                window.open(url, '_blank', 'noopener,noreferrer')
+                return
+            }
+            const a = document.createElement('a')
+            const label =
+                financialReport?.period?.label ||
+                financialReport?.period?.startDate ||
+                getToday()
+            a.href = url
+            a.download = `financial-report-${String(label).replace(/[\\/:*?"<>|]/g, '-')}.${format === 'pdf' ? 'pdf' : 'xlsx'}`
+            document.body.appendChild(a)
+            a.click()
+            a.remove()
+            URL.revokeObjectURL(url)
+        } catch (error: unknown) {
+            toaster.create({
+                title: 'فشل تصدير التقرير',
+                description: messageFromApi(error, 'حدث خطأ أثناء تصدير ملف Excel'),
+                type: 'error',
+                duration: 3000,
+            })
+        } finally {
+            setIsExportingFinancialReport(false)
+        }
+    }
+
     const formatAmount = (n: number | string | null | undefined) =>
         Math.round(typeof n === 'number' ? n : parseFloat(String(n ?? 0)) || 0).toString()
     const formatDate = (d: string) => new Date(d).toLocaleDateString('ar-EG', { year: 'numeric', month: 'short', day: 'numeric' })
 
+    const paymentStatusColor = (status?: string) => {
+        if (status === 'paid') return 'green'
+        if (status === 'partial' || status === 'outstanding') return 'orange'
+        if (status === 'unpaid') return 'red'
+        if (status === 'overpaid') return 'purple'
+        if (status === 'zero_due') return 'gray'
+        return 'gray'
+    }
+
+    const paymentBreakdownRows = useMemo(
+        () =>
+            financialReport?.charts?.paymentMethodDistribution ??
+            financialReport?.summary?.paymentBreakdown ??
+            [],
+        [financialReport],
+    )
+
+    const doctorRows = useMemo(
+        () =>
+            financialReport?.summary?.byDoctor ??
+            financialReport?.charts?.doctorIncomeDistribution ??
+            [],
+        [financialReport],
+    )
+
+    const trendRows = useMemo(() => {
+        if (!financialReport?.charts) return []
+        if (periodMode === 'months') return financialReport.charts.monthlyIncome ?? []
+        if (periodMode === 'week') {
+            return financialReport.charts.dailyIncome?.length
+                ? financialReport.charts.dailyIncome
+                : financialReport.charts.weeklyIncome ?? []
+        }
+        if (periodMode === 'month') return financialReport.charts.dailyIncome ?? []
+        return (
+            financialReport.charts.dailyIncome ??
+            financialReport.charts.weeklyIncome ??
+            financialReport.charts.monthlyIncome ??
+            []
+        )
+    }, [financialReport, periodMode])
+
+    const validationChecks = useMemo(
+        () => Object.entries(financialReport?.validation?.checks ?? {}),
+        [financialReport],
+    )
+
+    const validationAnomalies = useMemo(
+        () =>
+            Object.entries(financialReport?.validation?.anomalies ?? {}).filter(
+                ([, count]) => Number(count) > 0,
+            ),
+        [financialReport],
+    )
+
     const periodLabel = (() => {
+        if (financialReport?.period?.label) return financialReport.period.label
+        if (periodMode === 'day' && dayDate) return formatDateWithDay(dayDate)
+        if (periodMode === 'week' && weekDate) {
+            const range = getWeekRange(weekDate)
+            return range
+                ? `أسبوع ${formatDateWithDay(range.startDate)} — ${formatDateWithDay(range.endDate)}`
+                : 'أسبوع كامل'
+        }
         if (periodMode === 'days' && startDate && endDate)
             return `${formatDateWithDay(startDate)} — ${formatDateWithDay(endDate)}`
-        if (summary?.period && periodMode !== 'days') return summary.period
         if (periodMode === 'month' && month)
             return new Date(month + '-01').toLocaleDateString('ar-EG', { month: 'long', year: 'numeric' })
         if (periodMode === 'months' && startMonth && endMonth)
             return `${new Date(startMonth + '-01').toLocaleDateString('ar-EG', { month: 'long', year: 'numeric' })} — ${new Date(endMonth + '-01').toLocaleDateString('ar-EG', { month: 'long', year: 'numeric' })}`
-        return summary?.period ?? 'الفترة'
+        return 'الفترة'
     })()
 
     return (
@@ -683,7 +868,7 @@ export default function MonthlyAccountsPage() {
                     <Flex justify="space-between" align="center" flexWrap="wrap" gap={4}>
                         <Box>
                             <Heading size="xl" color="white" mb={1}>
-                                الحسابات الشهرية
+                                الحسابات والتقارير المالية
                             </Heading>
                             <Flex align="center" gap={2} color="whiteAlpha.900" fontSize="md">
                                 <Calendar size={18} />
@@ -693,11 +878,41 @@ export default function MonthlyAccountsPage() {
                         <Box bg="whiteAlpha.100" borderRadius="xl" p={3}>
                             <Tabs.Root value={periodMode} onValueChange={(e) => setPeriodMode(e.value as PeriodMode)} size="sm">
                                 <Tabs.List gap={1} flexWrap="wrap">
+                                    <Tabs.Trigger value="day">يوم محدد</Tabs.Trigger>
+                                    <Tabs.Trigger value="week">أسبوع كامل</Tabs.Trigger>
                                     <Tabs.Trigger value="month">شهر واحد</Tabs.Trigger>
                                     <Tabs.Trigger value="days">نطاق أيام</Tabs.Trigger>
                                     <Tabs.Trigger value="months">نطاق شهور</Tabs.Trigger>
                                 </Tabs.List>
                                 <Box mt={3} display="flex" flexWrap="wrap" gap={3} alignItems="center">
+                                    {periodMode === 'day' && (
+                                        <HStack>
+                                            <Text color="whiteAlpha.900" fontSize="sm">اليوم</Text>
+                                            <Input
+                                                type="date"
+                                                value={dayDate}
+                                                onChange={(e) => setDayDate(e.target.value)}
+                                                bg="white"
+                                                color="gray.800"
+                                                maxW="160px"
+                                                size="sm"
+                                            />
+                                        </HStack>
+                                    )}
+                                    {periodMode === 'week' && (
+                                        <HStack>
+                                            <Text color="whiteAlpha.900" fontSize="sm">أي يوم داخل الأسبوع</Text>
+                                            <Input
+                                                type="date"
+                                                value={weekDate}
+                                                onChange={(e) => setWeekDate(e.target.value)}
+                                                bg="white"
+                                                color="gray.800"
+                                                maxW="160px"
+                                                size="sm"
+                                            />
+                                        </HStack>
+                                    )}
                                     {periodMode === 'month' && (
                                         <HStack>
                                             <Text color="whiteAlpha.900" fontSize="sm">الشهر</Text>
@@ -764,327 +979,539 @@ export default function MonthlyAccountsPage() {
                     </Flex>
                 ) : (
                     <>
-                        {/* Summary Cards */}
-                        {summary && (
-                            <SimpleGrid columns={{ base: 1, sm: 2, lg: 5 }} gap={4} mb={8}>
-                                <Card.Root bg="white" shadow="md" borderRadius="xl" overflow="hidden">
-                                    <Card.Body p={5} display="flex" flexDirection="row" alignItems="center" gap={4}>
-                                        <Box p={3} bg="green.50" borderRadius="xl">
-                                            <TrendingUp size={24} color="#2d6a4f" />
-                                        </Box>
+                        {financialReport && (
+                            <Card.Root bg="white" shadow="lg" borderRadius="2xl" overflow="hidden" mb={8}>
+                                <Box
+                                    bg="linear-gradient(135deg, #2d6a4f 0%, #40916c 55%, #1b4332 100%)"
+                                    px={{ base: 4, md: 6 }}
+                                    py={5}
+                                >
+                                    <Flex justify="space-between" align="center" gap={4} flexWrap="wrap">
                                         <Box>
-                                            <Text fontSize="xs" color="gray.500" fontWeight="medium">دخل الحجوزات</Text>
-                                            <Text fontSize="xl" fontWeight="bold" color="#2d6a4f">{formatAmount(summary.incomeFromBookings)} EGP</Text>
-                                        </Box>
-                                    </Card.Body>
-                                </Card.Root>
-                                <Card.Root bg="white" shadow="md" borderRadius="xl" overflow="hidden">
-                                    <Card.Body p={5} display="flex" flexDirection="row" alignItems="center" gap={4}>
-                                        <Box p={3} bg="blue.50" borderRadius="xl">
-                                            <DollarSign size={24} color="#2b6cb0" />
-                                        </Box>
-                                        <Box>
-                                            <Text fontSize="xs" color="gray.500" fontWeight="medium">الدخل اليدوي</Text>
-                                            <Text fontSize="xl" fontWeight="bold" color="#2b6cb0">{formatAmount(summary.manualIncome)} EGP</Text>
-                                        </Box>
-                                    </Card.Body>
-                                </Card.Root>
-                                <Card.Root bg="white" shadow="md" borderRadius="xl" overflow="hidden">
-                                    <Card.Body p={5} display="flex" flexDirection="row" alignItems="center" gap={4}>
-                                        <Box p={3} bg="green.50" borderRadius="xl">
-                                            <TrendingUp size={24} color="#2d6a4f" />
-                                        </Box>
-                                        <Box>
-                                            <Text fontSize="xs" color="gray.500" fontWeight="medium">إجمالي الدخل</Text>
-                                            <Text fontSize="xl" fontWeight="bold" color="#2d6a4f">{formatAmount(summary.totalIncome)} EGP</Text>
-                                        </Box>
-                                    </Card.Body>
-                                </Card.Root>
-                                <Card.Root bg="white" shadow="md" borderRadius="xl" overflow="hidden">
-                                    <Card.Body p={5} display="flex" flexDirection="row" alignItems="center" gap={4}>
-                                        <Box p={3} bg="red.50" borderRadius="xl">
-                                            <TrendingDown size={24} color="#c53030" />
-                                        </Box>
-                                        <Box>
-                                            <Text fontSize="xs" color="gray.500" fontWeight="medium">إجمالي المصروفات</Text>
-                                            <Text fontSize="xl" fontWeight="bold" color="#c53030">{formatAmount(summary.totalExpenses)} EGP</Text>
-                                        </Box>
-                                    </Card.Body>
-                                </Card.Root>
-                                <Card.Root bg="white" shadow="md" borderRadius="xl" overflow="hidden">
-                                    <Card.Body p={5} display="flex" flexDirection="row" alignItems="center" gap={4}>
-                                        <Box p={3} bg="#fdfbf7" borderRadius="xl">
-                                            <Wallet size={24} color="#615b36" />
-                                        </Box>
-                                        <Box>
-                                            <Text fontSize="xs" color="gray.500" fontWeight="medium">الرصيد</Text>
-                                            <Text fontSize="xl" fontWeight="bold" color={summary.balance >= 0 ? '#615b36' : '#c53030'}>
-                                                {formatAmount(summary.balance)} EGP
+                                            <Heading size="lg" color="white">
+                                                التقرير المالي للحجوزات
+                                            </Heading>
+                                            <Text color="whiteAlpha.900" fontSize="sm" mt={1}>
+                                                مبني على بيانات الحجوزات الفعلية وطرق الدفع المقسمة.
                                             </Text>
-                                        </Box>
-                                    </Card.Body>
-                                </Card.Root>
-                            </SimpleGrid>
-                        )}
-
-                        {summary?.note && (
-                            <Flex
-                                align="start"
-                                gap={3}
-                                mb={6}
-                                p={4}
-                                bg="blue.50"
-                                borderRadius="xl"
-                                border="1px solid"
-                                borderColor="blue.100"
-                            >
-                                <Box color="blue.600" flexShrink={0} mt={0.5}>
-                                    <Info size={20} />
-                                </Box>
-                                <Text fontSize="sm" color="gray.700" lineHeight="tall">
-                                    {summary.note}
-                                </Text>
-                            </Flex>
-                        )}
-
-                        {summary && summary.incomeFromBookingsByDoctor && summary.incomeFromBookingsByDoctor.length > 0 && (
-                            <CollapsibleIncomeSection
-                                open={bookingsByDoctorOpen}
-                                onOpenChange={setBookingsByDoctorOpen}
-                                icon={<Stethoscope size={20} />}
-                                title="توزيع دخل الحجوزات حسب الطبيب (ملخص العيادة)"
-                                subtitle="الدخل اليدوي والمصروفات تظهر في الملخص أعلاه على مستوى العيادة فقط — هذا الجدول يخص حجوزات الفترة فقط."
-                                totalText={`الإجمالي: ${formatAmount(summary.incomeFromBookings)} EGP`}
-                                mb={8}
-                            >
-                                    <Box overflowX="auto">
-                                        <Table.Root size="sm">
-                                            <Table.Header bg="gray.50">
-                                                <Table.Row>
-                                                    <Table.ColumnHeader py={3} px={3} textAlign="right">الطبيب</Table.ColumnHeader>
-                                                    <Table.ColumnHeader py={3} px={3} textAlign="right">المبلغ</Table.ColumnHeader>
-                                                </Table.Row>
-                                            </Table.Header>
-                                            <Table.Body>
-                                                {summary.incomeFromBookingsByDoctor.map((row, i) => (
-                                                    <Table.Row key={row.doctorId ?? `none-${i}`}>
-                                                        <Table.Cell py={3} px={3}>{doctorRowLabel(row)}</Table.Cell>
-                                                        <Table.Cell py={3} px={3} fontWeight="bold" color="#615b36">
-                                                            {formatAmount(row.amount)} EGP
-                                                        </Table.Cell>
-                                                    </Table.Row>
-                                                ))}
-                                            </Table.Body>
-                                        </Table.Root>
-                                    </Box>
-                                    <Flex justify="space-between" align="center" pt={3} mt={3} borderTop="2px solid" borderColor="gray.100">
-                                        <Text fontWeight="bold" color="gray.700">إجمالي دخل الحجوزات</Text>
-                                        <Text fontWeight="bold" fontSize="lg" color="#615b36">{formatAmount(summary.incomeFromBookings)} EGP</Text>
-                                    </Flex>
-                            </CollapsibleIncomeSection>
-                        )}
-
-                        <SimpleGrid columns={{ base: 1, lg: 2 }} gap={8}>
-                            {/* دخل الحجوزات — حسب الطبيب + حسب العميل */}
-                            <CollapsibleIncomeSection
-                                open={bookingsSectionOpen}
-                                onOpenChange={setBookingsSectionOpen}
-                                icon={<Receipt size={20} />}
-                                title="دخل الحجوزات"
-                                subtitle="تفصيل API: حسب الطبيب ثم حسب العميل."
-                                totalText={
-                                    bookingsIncome?.total != null
-                                        ? `الإجمالي: ${formatAmount(bookingsIncome.total)} EGP`
-                                        : null
-                                }
-                            >
-                                    {bookingsIncome &&
-                                    ((bookingsIncome.byDoctor && bookingsIncome.byDoctor.length > 0) ||
-                                        (bookingsIncome.byCustomer && bookingsIncome.byCustomer.length > 0)) ? (
-                                        <Stack gap={8}>
-                                            {bookingsIncome.byDoctor && bookingsIncome.byDoctor.length > 0 && (
-                                                <Box>
-                                                    <Text fontWeight="bold" color="gray.700" mb={3} fontSize="sm">
-                                                        حسب الطبيب
-                                                    </Text>
-                                                    <Box overflowX="auto" mb={3}>
-                                                        <Table.Root size="sm">
-                                                            <Table.Header bg="gray.50">
-                                                                <Table.Row>
-                                                                    <Table.ColumnHeader py={3} px={3} textAlign="right">الطبيب</Table.ColumnHeader>
-                                                                    <Table.ColumnHeader py={3} px={3} textAlign="right">المبلغ</Table.ColumnHeader>
-                                                                </Table.Row>
-                                                            </Table.Header>
-                                                            <Table.Body>
-                                                                {bookingsIncome.byDoctor.map((row, i) => (
-                                                                    <Table.Row key={row.doctorId ?? `bd-${i}`}>
-                                                                        <Table.Cell py={3} px={3}>{doctorRowLabel(row)}</Table.Cell>
-                                                                        <Table.Cell py={3} px={3} fontWeight="bold" color="#615b36">
-                                                                            {formatAmount(row.amount)} EGP
-                                                                        </Table.Cell>
-                                                                    </Table.Row>
-                                                                ))}
-                                                            </Table.Body>
-                                                        </Table.Root>
-                                                    </Box>
-                                                    <Flex justify="space-between" align="center" pt={2} borderTop="1px solid" borderColor="gray.100">
-                                                        <Text fontSize="sm" color="gray.600">مجموع حسب الطبيب</Text>
-                                                        <Text fontWeight="bold" color="#615b36">
-                                                            {formatAmount(
-                                                                bookingsIncome.totalByDoctor ??
-                                                                    bookingsIncome.byDoctor.reduce((a, r) => a + (r.amount || 0), 0),
-                                                            )}{' '}
-                                                            EGP
-                                                        </Text>
-                                                    </Flex>
-                                                </Box>
+                                            {financialReport.period?.startDate && (
+                                                <Text color="whiteAlpha.800" fontSize="xs" mt={2}>
+                                                    {financialReport.period.startDate}
+                                                    {financialReport.period.endDate &&
+                                                        financialReport.period.endDate !== financialReport.period.startDate
+                                                        ? ` — ${financialReport.period.endDate}`
+                                                        : ''}
+                                                </Text>
                                             )}
-
-                                            {bookingsIncome.byCustomer && bookingsIncome.byCustomer.length > 0 && (
-                                                <Box>
-                                                    <Text fontWeight="bold" color="gray.700" mb={3} fontSize="sm">
-                                                        حسب العميل
-                                                    </Text>
-                                                    <Flex justify="space-between" align="center" mb={4} flexWrap="wrap" gap={3}>
-                                                        <Text fontWeight="bold" color="gray.600" fontSize="sm">الفلترة حسب الإجراء</Text>
-                                                        <Box bg="gray.50" border="1px solid" borderColor="gray.200" borderRadius="lg" px={2} minW="200px">
-                                                            <select
-                                                                value={filterProcedure}
-                                                                onChange={(e) => setFilterProcedure(e.target.value)}
-                                                                style={{ width: '100%', padding: '6px', background: 'transparent', outline: 'none' }}
-                                                            >
-                                                                <option value="all">الكل</option>
-                                                                <option value="none">بدون إجراء</option>
-                                                                {bookingsProceduresList.map(p => (
-                                                                    <option key={p} value={p}>{p}</option>
-                                                                ))}
-                                                            </select>
-                                                        </Box>
-                                                    </Flex>
-                                                    {filteredBookingsIncome.length > 0 ? (
-                                                        <>
-                                                            <Box overflowX="auto" mb={4}>
-                                                                <Table.Root size="sm">
-                                                                    <Table.Header bg="gray.50">
-                                                                        <Table.Row>
-                                                                            <Table.ColumnHeader py={3} px={3} textAlign="right">العميل</Table.ColumnHeader>
-                                                                            <Table.ColumnHeader py={3} px={3} textAlign="right">نوع الزيارة</Table.ColumnHeader>
-                                                                            <Table.ColumnHeader py={3} px={3} textAlign="right">الإجراء</Table.ColumnHeader>
-                                                                            <Table.ColumnHeader py={3} px={3} textAlign="right">المبلغ</Table.ColumnHeader>
-                                                                        </Table.Row>
-                                                                    </Table.Header>
-                                                                    <Table.Body>
-                                                                        {filteredBookingsIncome.map((row, i) => (
-                                                                            <Table.Row key={i}>
-                                                                                <Table.Cell py={3} px={3}>{row.customerName}</Table.Cell>
-                                                                                <Table.Cell py={3} px={3} color="gray.600">
-                                                                                    {/* @ts-ignore */}
-                                                                                    {row.visitType === 'checkup' ? 'كشف' : row.visitType === 'followup' ? 'إعادة' : row.visitType === 'consultation' ? 'استشارة' : (row.visitType || '—')}
-                                                                                </Table.Cell>
-                                                                                {/* @ts-ignore */}
-                                                                                <Table.Cell py={3} px={3}>{row.procedureType || '—'}</Table.Cell>
-                                                                                <Table.Cell py={3} px={3} fontWeight="bold" color="#615b36">{formatAmount(row.amount)} EGP</Table.Cell>
-                                                                            </Table.Row>
-                                                                        ))}
-                                                                    </Table.Body>
-                                                                </Table.Root>
-                                                            </Box>
-                                                            <Flex justify="space-between" align="center" pt={3} borderTop="2px solid" borderColor="gray.100">
-                                                                <Text fontWeight="bold" color="gray.700">الإجمالي (للفلتر)</Text>
-                                                                <Text fontWeight="bold" fontSize="lg" color="#615b36">
-                                                                    {formatAmount(filteredBookingsIncome.reduce((acc, row) => acc + (row.amount || 0), 0))} EGP
-                                                                </Text>
-                                                            </Flex>
-                                                        </>
-                                                    ) : (
-                                                        <Text fontSize="sm" color="gray.500" mb={2}>لا توجد صفوف تطابق الفلتر الحالي.</Text>
-                                                    )}
-                                                </Box>
-                                            )}
-
-                                            <Flex justify="space-between" align="center" pt={1} borderTop="2px solid" borderColor="gray.100">
-                                                <Text fontWeight="bold" color="gray.700">إجمالي دخل الحجوزات</Text>
-                                                <Text fontWeight="bold" fontSize="lg" color="#615b36">{formatAmount(bookingsIncome.total)} EGP</Text>
-                                            </Flex>
-                                        </Stack>
-                                    ) : (
-                                        <Box py={10} textAlign="center">
-                                            <Receipt size={40} color="#e2e8f0" style={{ margin: '0 auto 8px' }} />
-                                            <Text color="gray.500" fontSize="sm">لا يوجد دخل حجوزات للفترة المحددة</Text>
                                         </Box>
-                                    )}
-                            </CollapsibleIncomeSection>
-
-                            {/* الدخل اليدوي */}
-                            <CollapsibleIncomeSection
-                                open={manualIncomeSectionOpen}
-                                onOpenChange={setManualIncomeSectionOpen}
-                                icon={<DollarSign size={20} />}
-                                title="الدخل اليدوي"
-                                totalText={
-                                    manualIncome?.total != null
-                                        ? `الإجمالي: ${formatAmount(manualIncome.total)} EGP`
-                                        : null
-                                }
-                                headerAction={
-                                    <Button
-                                        size="sm"
-                                        bg="#615b36"
-                                        color="white"
-                                        _hover={{ bg: '#4a452a' }}
-                                        flexShrink={0}
-                                        mx={4}
-                                        my={3}
-                                        onClick={(e) => {
-                                            e.stopPropagation()
-                                            onIncomeOpen()
-                                        }}
-                                    >
-                                        <HStack gap={1} as="span">
-                                            <Plus size={16} />
-                                            <span>إضافة دخل</span>
+                                        <HStack gap={2} flexWrap="wrap">
+                                            <Button
+                                                variant="outline"
+                                                borderColor="whiteAlpha.600"
+                                                color="white"
+                                                _hover={{ bg: 'whiteAlpha.200' }}
+                                                onClick={() => setFinancialReportOpen((open) => !open)}
+                                                aria-expanded={financialReportOpen}
+                                                gap={2}
+                                            >
+                                                <ChevronDown
+                                                    size={18}
+                                                    style={{
+                                                        transform: financialReportOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+                                                        transition: 'transform 0.2s ease',
+                                                    }}
+                                                />
+                                                {financialReportOpen ? 'إخفاء التقرير' : 'عرض التقرير'}
+                                            </Button>
+                                            <Button
+                                                bg="white"
+                                                color="#1b4332"
+                                                _hover={{ bg: 'whiteAlpha.900' }}
+                                                loading={isExportingFinancialReport}
+                                                onClick={() => handleExportFinancialReport('excel')}
+                                                gap={2}
+                                            >
+                                                <Download size={18} />
+                                                Excel
+                                            </Button>
+                                            <Button
+                                                variant="outline"
+                                                borderColor="whiteAlpha.600"
+                                                color="white"
+                                                _hover={{ bg: 'whiteAlpha.200' }}
+                                                loading={isExportingFinancialReport}
+                                                onClick={() => handleExportFinancialReport('pdf')}
+                                                gap={2}
+                                            >
+                                                <FileText size={18} />
+                                                PDF
+                                            </Button>
+                                            <Button
+                                                variant="outline"
+                                                borderColor="whiteAlpha.600"
+                                                color="white"
+                                                _hover={{ bg: 'whiteAlpha.200' }}
+                                                loading={isExportingFinancialReport}
+                                                onClick={() => handleExportFinancialReport('print')}
+                                            >
+                                                طباعة
+                                            </Button>
                                         </HStack>
-                                    </Button>
-                                }
-                            >
-                                    {manualIncome && manualIncome.entries?.length > 0 ? (
-                                        <>
-                                            <Box overflowX="auto" mb={4}>
+                                    </Flex>
+                                </Box>
+
+                                {financialReportOpen && (
+                                <Card.Body p={{ base: 4, md: 6 }}>
+                                    <SimpleGrid columns={{ base: 1, sm: 2, lg: 6 }} gap={4} mb={6}>
+                                        <Card.Root bg="green.50" borderWidth="1px" borderColor="green.100">
+                                            <Card.Body p={4}>
+                                                <Text fontSize="xs" color="gray.600" fontWeight="bold">
+                                                    إجمالي قيمة الحجوزات
+                                                </Text>
+                                                <Text fontSize="xl" fontWeight="bold" color="green.700">
+                                                    {formatAmount(financialReport.cards?.totalIncome ?? financialReport.summary?.grossIncome)} EGP
+                                                </Text>
+                                            </Card.Body>
+                                        </Card.Root>
+                                        <Card.Root bg="blue.50" borderWidth="1px" borderColor="blue.100">
+                                            <Card.Body p={4}>
+                                                <Text fontSize="xs" color="gray.600" fontWeight="bold">
+                                                    إجمالي المحصل
+                                                </Text>
+                                                <Text fontSize="xl" fontWeight="bold" color="blue.700">
+                                                    {formatAmount(financialReport.cards?.totalPayments ?? financialReport.summary?.totalCollected)} EGP
+                                                </Text>
+                                            </Card.Body>
+                                        </Card.Root>
+                                        <Card.Root bg="orange.50" borderWidth="1px" borderColor="orange.100">
+                                            <Card.Body p={4}>
+                                                <Text fontSize="xs" color="gray.600" fontWeight="bold">
+                                                    إجمالي المتبقي
+                                                </Text>
+                                                <Text fontSize="xl" fontWeight="bold" color="orange.700">
+                                                    {formatAmount(financialReport.cards?.totalOutstanding ?? financialReport.summary?.totalOutstanding)} EGP
+                                                </Text>
+                                            </Card.Body>
+                                        </Card.Root>
+                                        <Card.Root bg="#fdfbf7" borderWidth="1px" borderColor="#e8e4d4">
+                                            <Card.Body p={4}>
+                                                <Text fontSize="xs" color="gray.600" fontWeight="bold">
+                                                    عدد الحجوزات
+                                                </Text>
+                                                <Text fontSize="xl" fontWeight="bold" color="#615b36">
+                                                    {financialReport.cards?.totalBookings ?? 0}
+                                                </Text>
+                                            </Card.Body>
+                                        </Card.Root>
+                                        <Card.Root bg="green.50" borderWidth="1px" borderColor="green.100">
+                                            <Card.Body p={4}>
+                                                <Text fontSize="xs" color="gray.600" fontWeight="bold">
+                                                    حالات مدفوعة
+                                                </Text>
+                                                <Text fontSize="xl" fontWeight="bold" color="green.700">
+                                                    {financialReport.cards?.paidCases ?? 0}
+                                                </Text>
+                                            </Card.Body>
+                                        </Card.Root>
+                                        <Card.Root bg="red.50" borderWidth="1px" borderColor="red.100">
+                                            <Card.Body p={4}>
+                                                <Text fontSize="xs" color="gray.600" fontWeight="bold">
+                                                    حالات غير مدفوعة
+                                                </Text>
+                                                <Text fontSize="xl" fontWeight="bold" color="red.700">
+                                                    {financialReport.cards?.unpaidCases ?? 0}
+                                                </Text>
+                                            </Card.Body>
+                                        </Card.Root>
+                                    </SimpleGrid>
+
+                                    <SimpleGrid columns={{ base: 1, lg: 2 }} gap={4} mb={6}>
+                                        <Box
+                                            p={4}
+                                            bg={financialReport.validation?.isBalanced ? 'green.50' : 'orange.50'}
+                                            borderRadius="xl"
+                                            borderWidth="1px"
+                                            borderColor={financialReport.validation?.isBalanced ? 'green.100' : 'orange.100'}
+                                        >
+                                            <Flex align="center" gap={2} mb={2}>
+                                                {financialReport.validation?.isBalanced ? (
+                                                    <CheckCircle size={20} color="#15803d" />
+                                                ) : (
+                                                    <AlertTriangle size={20} color="#c2410c" />
+                                                )}
+                                                <Text fontWeight="bold" color="gray.800">
+                                                    {financialReport.validation?.isBalanced
+                                                        ? 'التقرير متوازن محاسبيًا'
+                                                        : 'يوجد ملاحظات محاسبية'}
+                                                </Text>
+                                            </Flex>
+                                            <Text fontSize="sm" color="gray.600">
+                                                تطابق توزيع وسائل الدفع مع إجمالي المحصل:{' '}
+                                                {financialReport.summary?.paymentBreakdownMatchesCollected ? 'نعم' : 'لا'}
+                                            </Text>
+                                            {financialReport.validation?.excludedCancelledOrRejectedBookings != null && (
+                                                <Text fontSize="xs" color="gray.500" mt={1}>
+                                                    تم استبعاد {financialReport.validation.excludedCancelledOrRejectedBookings} حجز ملغي/مرفوض.
+                                                </Text>
+                                            )}
+                                            {validationChecks.length > 0 && (
+                                                <Flex gap={2} wrap="wrap" mt={3}>
+                                                    {validationChecks.map(([key, ok]) => (
+                                                        <Badge
+                                                            key={key}
+                                                            colorPalette={ok ? 'green' : 'orange'}
+                                                            variant="subtle"
+                                                            borderRadius="full"
+                                                            px={3}
+                                                            py={1}
+                                                        >
+                                                            {validationCheckLabels[key] ?? key}: {ok ? 'سليم' : 'مراجعة'}
+                                                        </Badge>
+                                                    ))}
+                                                </Flex>
+                                            )}
+                                            {validationAnomalies.length > 0 && (
+                                                <Flex gap={2} wrap="wrap" mt={3}>
+                                                    {validationAnomalies.map(([key, count]) => (
+                                                        <Badge
+                                                            key={key}
+                                                            colorPalette="red"
+                                                            variant="subtle"
+                                                            borderRadius="full"
+                                                            px={3}
+                                                            py={1}
+                                                        >
+                                                            {validationAnomalyLabels[key] ?? key}: {count}
+                                                        </Badge>
+                                                    ))}
+                                                </Flex>
+                                            )}
+                                        </Box>
+
+                                        <Box p={4} bg="gray.50" borderRadius="xl" borderWidth="1px" borderColor="gray.100">
+                                            <Text fontWeight="bold" color="gray.800" mb={3}>
+                                                توزيع المدفوعات حسب الوسيلة
+                                            </Text>
+                                            <Flex gap={2} wrap="wrap">
+                                                {paymentBreakdownRows.map((row, idx) => (
+                                                    <Badge
+                                                        key={`${row.method || row.label}-${idx}`}
+                                                        colorPalette="green"
+                                                        variant="subtle"
+                                                        borderRadius="full"
+                                                        px={3}
+                                                        py={1}
+                                                    >
+                                                        {row.label || row.method || 'غير محدد'}: {formatAmount(row.amount)} EGP
+                                                        {row.count != null ? ` (${row.count})` : ''}
+                                                    </Badge>
+                                                ))}
+                                                {paymentBreakdownRows.length === 0 && (
+                                                    <Text fontSize="sm" color="gray.500">لا توجد مدفوعات في الفترة.</Text>
+                                                )}
+                                            </Flex>
+                                        </Box>
+                                    </SimpleGrid>
+
+                                    <SimpleGrid columns={{ base: 1, xl: 2 }} gap={4} mb={6}>
+                                        <Box borderWidth="1px" borderColor="gray.100" borderRadius="xl" overflow="hidden">
+                                            <Box bg="#f8fafc" p={4} borderBottomWidth="1px" borderColor="gray.100">
+                                                <Heading size="md" color="#2d3748">
+                                                    حسابات الأطباء
+                                                </Heading>
+                                                <Text fontSize="sm" color="gray.500" mt={1}>
+                                                    إجمالي المستحق والمحصل والمتبقي لكل طبيب داخل الفترة.
+                                                </Text>
+                                            </Box>
+                                            <Box overflowX="auto">
                                                 <Table.Root size="sm">
                                                     <Table.Header bg="gray.50">
                                                         <Table.Row>
-                                                            <Table.ColumnHeader py={3} px={3} textAlign="right">الوصف</Table.ColumnHeader>
-                                                            <Table.ColumnHeader py={3} px={3} textAlign="right">التاريخ</Table.ColumnHeader>
-                                                            <Table.ColumnHeader py={3} px={3} textAlign="right">المبلغ</Table.ColumnHeader>
+                                                            <Table.ColumnHeader py={3} px={3} textAlign="right">الطبيب</Table.ColumnHeader>
+                                                            <Table.ColumnHeader py={3} px={3} textAlign="right">الحجوزات</Table.ColumnHeader>
+                                                            <Table.ColumnHeader py={3} px={3} textAlign="right">المستحق</Table.ColumnHeader>
+                                                            <Table.ColumnHeader py={3} px={3} textAlign="right">المحصل</Table.ColumnHeader>
+                                                            <Table.ColumnHeader py={3} px={3} textAlign="right">المتبقي</Table.ColumnHeader>
+                                                            <Table.ColumnHeader py={3} px={3} textAlign="right">الحالات</Table.ColumnHeader>
                                                         </Table.Row>
                                                     </Table.Header>
                                                     <Table.Body>
-                                                        {manualIncome.entries.map((entry, i) => (
-                                                            <Table.Row key={entry.id ?? i}>
-                                                                <Table.Cell py={3} px={3}>{entry.description}</Table.Cell>
-                                                                <Table.Cell py={3} px={3} color="gray.600" fontSize="sm">{formatDate(entry.entryDate)}</Table.Cell>
-                                                                <Table.Cell py={3} px={3} fontWeight="bold" color="green.600">{formatAmount(entry.amount)} EGP</Table.Cell>
+                                                        {doctorRows.length > 0 ? (
+                                                            doctorRows.map((doctor, idx) => (
+                                                                <Table.Row key={doctor.doctorId ?? `doctor-${idx}`}>
+                                                                    <Table.Cell py={3} px={3}>
+                                                                        <Text fontWeight="bold">
+                                                                            {doctor.doctorName || (doctor.doctorId ? `طبيب #${doctor.doctorId}` : 'بدون طبيب')}
+                                                                        </Text>
+                                                                        {(doctor.specialty || doctor.phone) && (
+                                                                            <Text fontSize="xs" color="gray.500">
+                                                                                {[doctor.specialty, doctor.phone].filter(Boolean).join(' - ')}
+                                                                            </Text>
+                                                                        )}
+                                                                    </Table.Cell>
+                                                                    <Table.Cell py={3} px={3}>{doctor.totalBookings ?? 0}</Table.Cell>
+                                                                    <Table.Cell py={3} px={3}>{formatAmount(doctor.grossIncome)} EGP</Table.Cell>
+                                                                    <Table.Cell py={3} px={3} color="green.700" fontWeight="bold">
+                                                                        {formatAmount(doctor.totalCollected)} EGP
+                                                                    </Table.Cell>
+                                                                    <Table.Cell py={3} px={3} color={Number(doctor.totalOutstanding ?? 0) > 0 ? 'orange.700' : 'gray.500'} fontWeight="bold">
+                                                                        {formatAmount(doctor.totalOutstanding)} EGP
+                                                                    </Table.Cell>
+                                                                    <Table.Cell py={3} px={3}>
+                                                                        <Flex gap={1} wrap="wrap">
+                                                                            <Badge colorPalette="green" variant="subtle">مدفوع {doctor.fullyPaidCases ?? 0}</Badge>
+                                                                            <Badge colorPalette="orange" variant="subtle">متبقي {doctor.outstandingCases ?? 0}</Badge>
+                                                                            {doctor.partialCases != null && (
+                                                                                <Badge colorPalette="yellow" variant="subtle">جزئي {doctor.partialCases}</Badge>
+                                                                            )}
+                                                                            {doctor.overpaidCases != null && doctor.overpaidCases > 0 && (
+                                                                                <Badge colorPalette="purple" variant="subtle">زائد {doctor.overpaidCases}</Badge>
+                                                                            )}
+                                                                        </Flex>
+                                                                    </Table.Cell>
+                                                                </Table.Row>
+                                                            ))
+                                                        ) : (
+                                                            <Table.Row>
+                                                                <Table.Cell colSpan={6} py={8} textAlign="center" color="gray.500">
+                                                                    لا توجد بيانات أطباء في الفترة.
+                                                                </Table.Cell>
                                                             </Table.Row>
-                                                        ))}
+                                                        )}
                                                     </Table.Body>
                                                 </Table.Root>
                                             </Box>
-                                            <Flex justify="space-between" align="center" pt={3} borderTop="2px solid" borderColor="gray.100">
-                                                <Text fontWeight="bold" color="gray.700">الإجمالي</Text>
-                                                <Text fontWeight="bold" fontSize="lg" color="green.600">{formatAmount(manualIncome.total)} EGP</Text>
-                                            </Flex>
-                                        </>
-                                    ) : (
-                                        <Box py={10} textAlign="center">
-                                            <DollarSign size={40} color="#e2e8f0" style={{ margin: '0 auto 8px' }} />
-                                            <Text color="gray.500" fontSize="sm">لا توجد إدخالات دخل يدوي للفترة المحددة</Text>
-                                            <Button size="sm" mt={3} variant="outline" colorScheme="green" onClick={onIncomeOpen}>
-                                                إضافة دخل يدوي
-                                            </Button>
                                         </Box>
-                                    )}
-                            </CollapsibleIncomeSection>
 
+                                        <Box borderWidth="1px" borderColor="gray.100" borderRadius="xl" overflow="hidden">
+                                            <Box bg="#f8fafc" p={4} borderBottomWidth="1px" borderColor="gray.100">
+                                                <Heading size="md" color="#2d3748">
+                                                    تطور الدخل
+                                                </Heading>
+                                                <Text fontSize="sm" color="gray.500" mt={1}>
+                                                    ملخص سريع من بيانات الرسوم البيانية اليومية/الأسبوعية/الشهرية.
+                                                </Text>
+                                            </Box>
+                                            <Box overflowX="auto">
+                                                <Table.Root size="sm">
+                                                    <Table.Header bg="gray.50">
+                                                        <Table.Row>
+                                                            <Table.ColumnHeader py={3} px={3} textAlign="right">الفترة</Table.ColumnHeader>
+                                                            <Table.ColumnHeader py={3} px={3} textAlign="right">الحجوزات</Table.ColumnHeader>
+                                                            <Table.ColumnHeader py={3} px={3} textAlign="right">المستحق</Table.ColumnHeader>
+                                                            <Table.ColumnHeader py={3} px={3} textAlign="right">المحصل</Table.ColumnHeader>
+                                                            <Table.ColumnHeader py={3} px={3} textAlign="right">المتبقي</Table.ColumnHeader>
+                                                        </Table.Row>
+                                                    </Table.Header>
+                                                    <Table.Body>
+                                                        {trendRows.length > 0 ? (
+                                                            trendRows.slice(0, 10).map((row, idx) => (
+                                                                <Table.Row key={`${row.periodStart ?? 'period'}-${idx}`}>
+                                                                    <Table.Cell py={3} px={3}>{row.periodStart || '—'}</Table.Cell>
+                                                                    <Table.Cell py={3} px={3}>{row.bookingCount ?? 0}</Table.Cell>
+                                                                    <Table.Cell py={3} px={3}>{formatAmount(row.grossIncome)} EGP</Table.Cell>
+                                                                    <Table.Cell py={3} px={3} color="green.700" fontWeight="bold">
+                                                                        {formatAmount(row.totalCollected)} EGP
+                                                                    </Table.Cell>
+                                                                    <Table.Cell py={3} px={3} color={Number(row.totalOutstanding ?? 0) > 0 ? 'orange.700' : 'gray.500'} fontWeight="bold">
+                                                                        {formatAmount(row.totalOutstanding)} EGP
+                                                                    </Table.Cell>
+                                                                </Table.Row>
+                                                            ))
+                                                        ) : (
+                                                            <Table.Row>
+                                                                <Table.Cell colSpan={5} py={8} textAlign="center" color="gray.500">
+                                                                    لا توجد بيانات ترند في الفترة.
+                                                                </Table.Cell>
+                                                            </Table.Row>
+                                                        )}
+                                                    </Table.Body>
+                                                </Table.Root>
+                                            </Box>
+                                        </Box>
+                                    </SimpleGrid>
+
+                                    <Box borderWidth="1px" borderColor="gray.100" borderRadius="xl" overflow="hidden">
+                                        <Box bg="#f8fafc" p={4} borderBottomWidth="1px" borderColor="gray.100">
+                                            <Flex justify="space-between" align="center" gap={3} wrap="wrap">
+                                                <Box>
+                                                    <Heading size="md" color="#2d3748">
+                                                        جدول الحالات المالي
+                                                    </Heading>
+                                                    <Text fontSize="sm" color="gray.500" mt={1}>
+                                                        بحث وتصفية حسب حالة الدفع ووسيلة الدفع.
+                                                    </Text>
+                                                </Box>
+                                                <Badge colorPalette="gray" variant="subtle" borderRadius="full" px={3}>
+                                                    {financialCases?.total ?? 0} حالة
+                                                </Badge>
+                                            </Flex>
+                                            <Flex gap={3} mt={4} wrap="wrap">
+                                                <Box flex="1" minW="220px" position="relative">
+                                                    <Input
+                                                        placeholder="بحث باسم الحالة أو الهاتف أو الخدمة"
+                                                        value={financialSearch}
+                                                        onChange={(e) => {
+                                                            setFinancialSearch(e.target.value)
+                                                            setFinancialCasesPage(1)
+                                                        }}
+                                                        bg="white"
+                                                        pr={9}
+                                                    />
+                                                    <Box position="absolute" right={3} top="50%" transform="translateY(-50%)" color="gray.400">
+                                                        <Search size={16} />
+                                                    </Box>
+                                                </Box>
+                                                <Box bg="white" borderWidth="1px" borderColor="gray.200" borderRadius="md" px={2}>
+                                                    <select
+                                                        value={financialPaymentStatus}
+                                                        onChange={(e) => {
+                                                            setFinancialPaymentStatus(e.target.value as FinancialPaymentStatus)
+                                                            setFinancialCasesPage(1)
+                                                        }}
+                                                        style={{ padding: '9px', background: 'transparent', outline: 'none' }}
+                                                    >
+                                                        <option value="all">كل حالات الدفع</option>
+                                                        <option value="paid">مدفوع بالكامل</option>
+                                                        <option value="partial">مدفوع جزئيًا</option>
+                                                        <option value="unpaid">غير مدفوع</option>
+                                                        <option value="outstanding">عليه متبقي</option>
+                                                        <option value="with_payment">به أي دفع</option>
+                                                        <option value="without_payment">بدون دفع</option>
+                                                    </select>
+                                                </Box>
+                                                <Box bg="white" borderWidth="1px" borderColor="gray.200" borderRadius="md" px={2}>
+                                                    <select
+                                                        value={financialPaymentMethod}
+                                                        onChange={(e) => {
+                                                            setFinancialPaymentMethod(e.target.value as FinancialPaymentMethod)
+                                                            setFinancialCasesPage(1)
+                                                        }}
+                                                        style={{ padding: '9px', background: 'transparent', outline: 'none' }}
+                                                    >
+                                                        <option value="all">كل طرق الدفع</option>
+                                                        <option value="cash">نقدي</option>
+                                                        <option value="vodafone_cash">فودافون كاش</option>
+                                                        <option value="instapay">إنستا باي</option>
+                                                        <option value="visa">فيزا</option>
+                                                    </select>
+                                                </Box>
+                                            </Flex>
+                                        </Box>
+
+                                        <Box overflowX="auto">
+                                            <Table.Root size="sm">
+                                                <Table.Header bg="gray.50">
+                                                    <Table.Row>
+                                                        <Table.ColumnHeader py={3} px={3} textAlign="right">الحالة</Table.ColumnHeader>
+                                                        <Table.ColumnHeader py={3} px={3} textAlign="right">التاريخ</Table.ColumnHeader>
+                                                        <Table.ColumnHeader py={3} px={3} textAlign="right">الخدمة</Table.ColumnHeader>
+                                                        <Table.ColumnHeader py={3} px={3} textAlign="right">قيمة الحجز</Table.ColumnHeader>
+                                                        <Table.ColumnHeader py={3} px={3} textAlign="right">المدفوع</Table.ColumnHeader>
+                                                        <Table.ColumnHeader py={3} px={3} textAlign="right">المتبقي</Table.ColumnHeader>
+                                                        <Table.ColumnHeader py={3} px={3} textAlign="right">حالة الدفع</Table.ColumnHeader>
+                                                        <Table.ColumnHeader py={3} px={3} textAlign="right">طرق الدفع</Table.ColumnHeader>
+                                                    </Table.Row>
+                                                </Table.Header>
+                                                <Table.Body>
+                                                    {isFinancialCasesLoading ? (
+                                                        <Table.Row>
+                                                            <Table.Cell colSpan={8} py={10} textAlign="center">
+                                                                <Spinner color="#615b36" />
+                                                            </Table.Cell>
+                                                        </Table.Row>
+                                                    ) : financialCases?.cases && financialCases.cases.length > 0 ? (
+                                                        financialCases.cases.map((row) => (
+                                                            <Table.Row key={row.bookingId}>
+                                                                <Table.Cell py={3} px={3}>
+                                                                    <Text fontWeight="bold">{row.patientName}</Text>
+                                                                    <Text fontSize="xs" color="gray.500" dir="ltr" textAlign="right">{row.phone || '—'}</Text>
+                                                                    {row.doctorName && (
+                                                                        <Text fontSize="xs" color="#615b36" mt={1}>
+                                                                            الطبيب: {row.doctorName}
+                                                                            {row.doctorSpecialty ? ` - ${row.doctorSpecialty}` : ''}
+                                                                        </Text>
+                                                                    )}
+                                                                </Table.Cell>
+                                                                <Table.Cell py={3} px={3} color="gray.600">{row.bookingDate || '—'}</Table.Cell>
+                                                                <Table.Cell py={3} px={3}>{row.service || '—'}</Table.Cell>
+                                                                <Table.Cell py={3} px={3}>{formatAmount(row.totalAmount ?? row.bookingValue)} EGP</Table.Cell>
+                                                                <Table.Cell py={3} px={3} color="green.700" fontWeight="bold">{formatAmount(row.amountPaid)} EGP</Table.Cell>
+                                                                <Table.Cell py={3} px={3} color={Number(row.remainingAmount ?? 0) > 0 ? 'orange.700' : 'gray.500'} fontWeight="bold">
+                                                                    {formatAmount(row.remainingAmount)} EGP
+                                                                </Table.Cell>
+                                                                <Table.Cell py={3} px={3}>
+                                                                    <Badge colorPalette={paymentStatusColor(row.paymentStatus)} variant="subtle" borderRadius="full">
+                                                                        {row.paymentStatusLabel || row.paymentStatus || 'غير محدد'}
+                                                                    </Badge>
+                                                                </Table.Cell>
+                                                                <Table.Cell py={3} px={3}>
+                                                                    <Flex gap={1} wrap="wrap">
+                                                                        {(row.paymentMethods ?? []).map((payment, idx) => (
+                                                                            <Badge key={`${row.bookingId}-${payment.method}-${idx}`} variant="outline" colorPalette="blue">
+                                                                                {payment.label || payment.method}: {formatAmount(payment.amount)} EGP
+                                                                            </Badge>
+                                                                        ))}
+                                                                        {(row.paymentMethods ?? []).length === 0 && <Text fontSize="xs" color="gray.400">—</Text>}
+                                                                    </Flex>
+                                                                </Table.Cell>
+                                                            </Table.Row>
+                                                        ))
+                                                    ) : (
+                                                        <Table.Row>
+                                                            <Table.Cell colSpan={8} py={10} textAlign="center" color="gray.500">
+                                                                لا توجد حالات مطابقة.
+                                                            </Table.Cell>
+                                                        </Table.Row>
+                                                    )}
+                                                </Table.Body>
+                                            </Table.Root>
+                                        </Box>
+
+                                        <Flex p={4} justify="space-between" align="center" gap={3} wrap="wrap" bg="#f8fafc">
+                                            <Text fontSize="sm" color="gray.600">
+                                                صفحة {financialCases?.page ?? financialCasesPage} من {financialCases?.totalPages ?? 1}
+                                            </Text>
+                                            <Flex gap={2}>
+                                                <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    disabled={financialCasesPage <= 1 || isFinancialCasesLoading}
+                                                    onClick={() => setFinancialCasesPage((p) => Math.max(1, p - 1))}
+                                                >
+                                                    السابق
+                                                </Button>
+                                                <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    disabled={
+                                                        financialCasesPage >= (financialCases?.totalPages ?? 1) ||
+                                                        isFinancialCasesLoading
+                                                    }
+                                                    onClick={() =>
+                                                        setFinancialCasesPage((p) =>
+                                                            Math.min(financialCases?.totalPages ?? 1, p + 1),
+                                                        )
+                                                    }
+                                                >
+                                                    التالي
+                                                </Button>
+                                            </Flex>
+                                        </Flex>
+                                    </Box>
+                                </Card.Body>
+                                )}
+                            </Card.Root>
+                        )}
+
+                        {/* Summary Cards */}
+                     
+
+                   
+
+                     
+
+                        <SimpleGrid columns={{ base: 1, lg: 2 }} gap={8}>
                             {/* أنواع وتصنيفات المصروفات — منفصلة عن مودال إضافة المصروف */}
                             <Card.Root
                                 id="expense-taxonomy"
@@ -1409,52 +1836,6 @@ export default function MonthlyAccountsPage() {
                     </>
                 )}
             </Container>
-
-            {/* Modal: إضافة دخل يدوي */}
-            <Dialog.Root open={isIncomeOpen} onOpenChange={(e) => !e.open && onIncomeClose()} size="md">
-                <Dialog.Backdrop />
-                <Dialog.Positioner>
-                    <Dialog.Content dir="rtl">
-                        <Dialog.CloseTrigger />
-                        <Dialog.Header fontSize="lg" fontWeight="bold">إضافة دخل يدوي</Dialog.Header>
-                        <Dialog.Body>
-                            <Stack gap={4}>
-                                <Field.Root required>
-                                    <Field.Label>اسم العملية / وصف الدخل</Field.Label>
-                                    <Input
-                                        placeholder="مثال: استشارة خاصة"
-                                        value={incomeForm.description}
-                                        onChange={(e) => setIncomeForm((p) => ({ ...p, description: e.target.value }))}
-                                    />
-                                </Field.Root>
-                                <Field.Root required>
-                                    <Field.Label>المبلغ (EGP)</Field.Label>
-                                    <Input
-                                        type="number"
-                                        placeholder="0"
-                                        value={incomeForm.amount || ''}
-                                        onChange={(e) => setIncomeForm((p) => ({ ...p, amount: parseFloat(e.target.value) || 0 }))}
-                                    />
-                                </Field.Root>
-                                <Field.Root>
-                                    <Field.Label>التاريخ (اختياري)</Field.Label>
-                                    <Input
-                                        type="date"
-                                        value={incomeForm.entryDate || ''}
-                                        onChange={(e) => setIncomeForm((p) => ({ ...p, entryDate: e.target.value }))}
-                                    />
-                                </Field.Root>
-                            </Stack>
-                        </Dialog.Body>
-                        <Dialog.Footer gap={3}>
-                            <Button variant="ghost" onClick={onIncomeClose}>إلغاء</Button>
-                            <Button bg="#615b36" color="white" _hover={{ bg: '#4a452a' }} onClick={handleAddIncome} loading={incomeSaving} disabled={!incomeForm.description?.trim() || incomeForm.amount <= 0}>
-                                حفظ
-                            </Button>
-                        </Dialog.Footer>
-                    </Dialog.Content>
-                </Dialog.Positioner>
-            </Dialog.Root>
 
             {/* Modal: إضافة مصروف */}
             <Dialog.Root open={isExpenseOpen} onOpenChange={(e) => !e.open && onExpenseClose()} size="lg">

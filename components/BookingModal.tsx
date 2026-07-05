@@ -15,12 +15,14 @@ import {
   Switch,
 } from "@chakra-ui/react";
 import { useState, useEffect, useMemo, useRef, useCallback, type CSSProperties } from "react";
-import { Plus, CalendarPlus, User, Phone, Stethoscope, Clock, Banknote, CreditCard } from "lucide-react";
+import { Plus, CalendarPlus, User, Phone, Stethoscope, Clock, CreditCard } from "lucide-react";
 import {
   Booking,
   CLINIC_PAYMENT_OPTIONS,
   type ClinicPaymentMethod,
+  type BookingServiceItem,
 } from "@/types/booking";
+import type { ClinicService } from "@/types/clinic-service";
 import api from "@/lib/axios";
 import { hasBookingSpecificTime } from "@/lib/booking-display";
 import { getCurrentDoctorId } from "@/lib/doctor-context";
@@ -95,9 +97,17 @@ function mapVisitTypeForApi(uiLabel: string): string {
 
 function parseVisitTypesFromInitial(vt: unknown): string[] {
   if (vt == null || vt === "") return [BOOKING_SERVICES[0] ?? "كشف"];
-  const parts = Array.isArray(vt)
-    ? vt.map(String)
-    : String(vt)
+  if (Array.isArray(vt)) {
+    const parts = vt.map((item) =>
+      typeof item === "object" && item && "name" in item
+        ? String((item as BookingServiceItem).name ?? "")
+        : String(item),
+    );
+    const ui = parts.map(parseApiVisitTypeToUi);
+    const unique = [...new Set(ui.filter(Boolean))];
+    return unique.length > 0 ? unique : [BOOKING_SERVICES[0] ?? "كشف"];
+  }
+  const parts = String(vt)
         .split(/[,،|]/)
         .map((s) => s.trim())
         .filter(Boolean);
@@ -121,9 +131,87 @@ function parseAmountPaid(raw: string): number | null {
   return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
-function isServiceLabelAsName(name: string): boolean {
+type SelectedServiceRow = {
+  name: string;
+  price: string;
+};
+
+function parseServiceItemsFromBooking(booking: Booking): SelectedServiceRow[] {
+  if (Array.isArray(booking.serviceItems) && booking.serviceItems.length > 0) {
+    return booking.serviceItems.map((item) => ({
+      name: parseApiVisitTypeToUi(String(item.name ?? "")),
+      price: sanitizeAmountInput(String(item.price ?? "")) || "0",
+    }));
+  }
+
+  const rawProcedureTypes = booking.procedureTypes;
+  if (
+    Array.isArray(rawProcedureTypes) &&
+    rawProcedureTypes.length > 0 &&
+    typeof rawProcedureTypes[0] === "object"
+  ) {
+    return rawProcedureTypes.map((item) => {
+      const row = item as BookingServiceItem;
+      return {
+        name: parseApiVisitTypeToUi(String(row.name ?? "")),
+        price: sanitizeAmountInput(String(row.price ?? "")) || "0",
+      };
+    });
+  }
+
+  const types = parseVisitTypesFromInitial(
+    rawProcedureTypes ?? booking.procedureType ?? booking.visitType,
+  );
+  const totalRaw =
+    booking.servicesTotal ?? booking.totalAmount ?? booking.amountPaid ?? 0;
+  const total =
+    typeof totalRaw === "string" ? parseFloat(totalRaw) || 0 : Number(totalRaw) || 0;
+
+  if (types.length === 1 && total > 0) {
+    return [{ name: types[0], price: String(Math.round(total)) }];
+  }
+
+  return types.map((name) => ({ name, price: "" }));
+}
+
+function isServiceLabelAsName(name: string, serviceLabels: string[]): boolean {
   const n = name.trim().toLowerCase();
-  return BOOKING_SERVICES.some((s) => s.toLowerCase() === n);
+  return serviceLabels.some((s) => s.toLowerCase() === n);
+}
+
+function normalizeClinicServiceNames(payload: unknown): string[] {
+  const raw = Array.isArray(payload)
+    ? payload
+    : payload &&
+        typeof payload === "object" &&
+        Array.isArray((payload as { services?: unknown }).services)
+      ? (payload as { services: unknown[] }).services
+      : [];
+  const names = raw
+    .map((item) => {
+      if (typeof item === "string") return item.trim();
+      if (item && typeof item === "object" && "name" in item) {
+        return String((item as ClinicService).name ?? "").trim();
+      }
+      return "";
+    })
+    .filter(Boolean);
+  return [...new Set(names)];
+}
+
+/** توحيد أسماء الخدمات للعرض — «إعادة» و«followup» تُعرض كـ «متابعة» مرة واحدة */
+function buildUniqueServiceOptions(rawNames: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of rawNames) {
+    const label = parseApiVisitTypeToUi(String(raw ?? "").trim());
+    if (!label) continue;
+    const key = label.trim().toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(label);
+  }
+  return out;
 }
 
 function validateEgyptPhone(phone: string): string | null {
@@ -163,7 +251,8 @@ type FormErrors = Partial<
     | "amountPaid"
     | "paymentMethod"
     | "transferFromPhone"
-    | "visitType",
+    | "visitType"
+    | "services",
     string
   >
 >;
@@ -229,9 +318,12 @@ export default function BookingModal({
   const [paymentRows, setPaymentRows] = useState<PaymentRow[]>([
     { method: "cash", amount: "" },
   ]);
-  const [selectedVisitTypes, setSelectedVisitTypes] = useState<string[]>([
-    BOOKING_SERVICES[0] ?? "كشف",
+  const [selectedServices, setSelectedServices] = useState<SelectedServiceRow[]>([
+    { name: BOOKING_SERVICES[0] ?? "كشف", price: "" },
   ]);
+  const [availableServices, setAvailableServices] = useState<string[]>(() =>
+    buildUniqueServiceOptions(BOOKING_SERVICES),
+  );
   const [availableSlots, setAvailableSlots] = useState<string[]>([]);
   const [isLoadingSlots, setIsLoadingSlots] = useState(false);
   const [doctors, setDoctors] = useState<Array<{ id: number; name?: string; user?: { name?: string } }>>([]);
@@ -302,33 +394,63 @@ export default function BookingModal({
   const showSuggestionList =
     !initialData && nameFocused && nameSuggestions.length > 0;
 
+  const servicesTotal = useMemo(
+    () =>
+      selectedServices.reduce(
+        (sum, row) => sum + (parseAmountPaid(row.price) ?? 0),
+        0,
+      ),
+    [selectedServices],
+  );
+
   const totalPaymentAmount = useMemo(
     () =>
       paymentRows.reduce((sum, row) => sum + (parseAmountPaid(row.amount) ?? 0), 0),
     [paymentRows],
   );
 
-  const toggleVisitType = (service: string) => {
+  const toggleService = (service: string) => {
     const label = parseApiVisitTypeToUi(service);
-    setSelectedVisitTypes((prev) => {
-      if (prev.includes(label)) {
+    setSelectedServices((prev) => {
+      if (prev.some((row) => row.name === label)) {
         if (prev.length <= 1) return prev;
-        return prev.filter((s) => s !== label);
+        return prev.filter((row) => row.name !== label);
       }
-      return [...prev, label];
+      return [...prev, { name: label, price: "" }];
     });
     setFormErrors((prev) => {
       const next = { ...prev };
       delete next.visitType;
+      delete next.services;
       return next;
     });
+  };
+
+  const updateServicePrice = (serviceName: string, price: string) => {
+    setSelectedServices((prev) =>
+      prev.map((row) =>
+        row.name === serviceName ? { ...row, price: sanitizeAmountInput(price) } : row,
+      ),
+    );
+    setFormErrors((prev) => {
+      const next = { ...prev };
+      delete next.services;
+      delete next.amountPaid;
+      return next;
+    });
+  };
+
+  const toggleVisitType = (service: string) => {
+    toggleService(service);
   };
 
   const applyCustomerHint = (c: KnownCustomerHint) => {
     setName(c.customerName);
     setPhone(c.customerPhone || "");
     if (c.visitType) {
-      setSelectedVisitTypes(parseVisitTypesFromInitial(c.visitType));
+      setSelectedServices(
+        parseVisitTypesFromInitial(c.visitType).map((name) => ({ name, price: "" })),
+      );
     }
     setFormErrors((prev) => {
       const next = { ...prev };
@@ -373,7 +495,7 @@ export default function BookingModal({
             ? String(initialData.age)
             : "",
         );
-        setSelectedVisitTypes(parseVisitTypesFromInitial(initialData.visitType));
+        setSelectedServices(parseServiceItemsFromBooking(initialData));
 
         const amountRaw =
           typeof initialData.amountPaid === "string"
@@ -470,7 +592,7 @@ export default function BookingModal({
         setAmountPaid("");
         setPaymentMethod("cash");
         setPaymentRows([{ method: "cash", amount: "" }]);
-        setSelectedVisitTypes([BOOKING_SERVICES[0] ?? "كشف"]);
+        setSelectedServices([{ name: BOOKING_SERVICES[0] ?? "كشف", price: "" }]);
         setAvailableSlots([]);
         const preferred =
           Number(doctorId ?? 0) || getCurrentDoctorId() || 0;
@@ -580,6 +702,26 @@ export default function BookingModal({
   }, [isOpen, date, selectedDoctorId, noTime]);
 
   useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    void api
+      .get("/clinic-services")
+      .then((res) => {
+        if (cancelled) return;
+        const names = normalizeClinicServiceNames(res.data);
+        setAvailableServices(
+          buildUniqueServiceOptions(names.length > 0 ? names : BOOKING_SERVICES),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setAvailableServices(buildUniqueServiceOptions(BOOKING_SERVICES));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
     if (!isOpen) setNameFocused(false);
   }, [isOpen]);
 
@@ -595,7 +737,7 @@ export default function BookingModal({
 
     if (trimmedName.length < 2) {
       errors.name = "اسم العميل مطلوب (حرفان على الأقل)";
-    } else if (isServiceLabelAsName(trimmedName)) {
+    } else if (isServiceLabelAsName(trimmedName, availableServices)) {
       errors.name = "أدخل اسم العميل وليس نوع الخدمة (مثل: كشف)";
     } else if (/^\d+$/.test(trimmedName.replace(/\s/g, ""))) {
       errors.name = "الاسم لا يمكن أن يكون أرقامًا فقط";
@@ -660,12 +802,20 @@ export default function BookingModal({
       errors.amountPaid = "أدخل مبلغًا واحدًا على الأقل";
     }
 
-    if (selectedVisitTypes.length === 0) {
-      errors.visitType = "اختر نوعًا واحدًا على الأقل";
-    } else if (
-      selectedVisitTypes.some((t) => !BOOKING_SERVICES.includes(t))
-    ) {
-      errors.visitType = "اختر أنواع الحجز من القائمة فقط";
+    if (selectedServices.length === 0) {
+      errors.visitType = "اختر خدمة واحدة على الأقل";
+    } else {
+      for (const row of selectedServices) {
+        const price = parseAmountPaid(row.price);
+        if (price === null || price <= 0) {
+          errors.services = "أدخل سعرًا صحيحًا لكل خدمة مختارة";
+          break;
+        }
+      }
+    }
+
+    if (servicesTotal > 0 && totalPaymentAmount > servicesTotal) {
+      errors.amountPaid = "المبلغ المدفوع لا يمكن أن يكون أكبر من إجمالي الخدمات";
     }
 
     return errors;
@@ -679,7 +829,9 @@ export default function BookingModal({
     noTime,
     paymentRows,
     totalPaymentAmount,
-    selectedVisitTypes,
+    selectedServices,
+    servicesTotal,
+    availableServices,
     availableSlots,
     isNewBooking,
   ]);
@@ -747,12 +899,18 @@ export default function BookingModal({
       .filter((row) => row.amount > 0);
     const amount = payments.reduce((sum, row) => sum + row.amount, 0);
     const parsedAge = age.trim() ? Number(age) : null;
-    const visitTypesForApi = selectedVisitTypes.map(mapVisitTypeForApi);
+    const services: BookingServiceItem[] = selectedServices.map((row) => ({
+      name: mapVisitTypeForApi(row.name),
+      price: parseAmountPaid(row.price) ?? 0,
+    }));
+    const visitTypesForApi = services.map((row) => row.name);
     const singlePayment = payments.length === 1 ? payments[0] : null;
     const bookingData: Record<string, unknown> = {
       name: name.trim(),
       phone: phone.replace(/\D/g, ""),
       amountPaid: amount,
+      services,
+      paymentDetails: payments,
       paymentMethod: singlePayment?.method ?? payments[0]?.method ?? paymentMethod,
       procedureTypes: visitTypesForApi,
       visitTypes: visitTypesForApi,
@@ -888,7 +1046,11 @@ export default function BookingModal({
               bg="gray.50"
             >
               <VStack gap={{ base: 4, md: 5 }} align="stretch">
-                <SimpleGrid columns={{ base: 1, md: 3 }} gap={{ base: 4, md: 5 }}>
+                <Box>
+                  <Text fontSize="sm" fontWeight="bold" color="gray.700" mb={3}>
+                    بيانات العميل
+                  </Text>
+                  <SimpleGrid columns={{ base: 1, md: 3 }} gap={{ base: 4, md: 5 }}>
                 <Field.Root invalid={!!formErrors.name} position="relative">
                   <Field.Label fontSize="sm" color="gray.700" display="flex" alignItems="center" gap={2}>
                     <User size={16} color="#615b36" />
@@ -1026,6 +1188,7 @@ export default function BookingModal({
                   {formErrors.age && <Field.ErrorText>{formErrors.age}</Field.ErrorText>}
                 </Field.Root>
                 </SimpleGrid>
+                </Box>
 
                 {isNewBooking ? (
                   <>
@@ -1062,7 +1225,7 @@ export default function BookingModal({
                     <Field.Root invalid={!!(formErrors.date || formErrors.time)}>
                       <Field.Label fontSize="sm" color="gray.700" display="flex" alignItems="center" gap={2}>
                         <Clock size={16} color="#615b36" />
-                        تاريخ ووقت الحجز
+                        تاريخ الحجز
                       </Field.Label>
                     <Flex
                       align="center"
@@ -1197,6 +1360,102 @@ export default function BookingModal({
                   </Box>
                 )}
 
+                <Field.Root invalid={!!formErrors.visitType}>
+                  <Field.Label fontSize="sm" color="gray.700" mb={2}>
+                    اختيار الخدمات
+                  </Field.Label>
+                  <Flex wrap="wrap" gap={2}>
+                    {availableServices.map((service) => {
+                      const selected = selectedServices.some((row) => row.name === service);
+                      return (
+                        <Button
+                          key={service}
+                          type="button"
+                          size="sm"
+                          variant={selected ? "solid" : "outline"}
+                          bg={selected ? "#615b36" : "white"}
+                          color={selected ? "white" : "gray.700"}
+                          borderColor={selected ? "#615b36" : "gray.300"}
+                          _hover={{
+                            bg: selected ? "#4a452a" : "gray.50",
+                          }}
+                          onClick={() => toggleService(service)}
+                          fontWeight="medium"
+                          borderRadius="full"
+                          px={4}
+                        >
+                          {service}
+                        </Button>
+                      );
+                    })}
+                  </Flex>
+                  {formErrors.visitType && <Field.ErrorText>{formErrors.visitType}</Field.ErrorText>}
+                </Field.Root>
+
+                {selectedServices.length > 0 && (
+                  <Field.Root invalid={!!formErrors.services}>
+                    <Field.Label fontSize="sm" color="gray.700" mb={2}>
+                      أسعار الخدمات
+                    </Field.Label>
+                    <VStack align="stretch" gap={2}>
+                      {selectedServices.map((row) => (
+                        <SimpleGrid
+                          key={row.name}
+                          columns={{ base: 1, md: 2 }}
+                          gap={2}
+                          bg="white"
+                          border="1px solid"
+                          borderColor="gray.200"
+                          borderRadius="xl"
+                          p={3}
+                        >
+                          <Box display="flex" alignItems="center">
+                            <Text fontWeight="bold" color="#615b36" fontSize="sm">
+                              {row.name}
+                            </Text>
+                          </Box>
+                          <Input
+                            type="text"
+                            inputMode="numeric"
+                            placeholder="سعر الخدمة (EGP)"
+                            value={row.price}
+                            onChange={(e) =>
+                              updateServicePrice(row.name, e.target.value)
+                            }
+                            {...inputStyles}
+                            borderColor={formErrors.services ? "red.300" : "gray.200"}
+                          />
+                        </SimpleGrid>
+                      ))}
+                    </VStack>
+                    {formErrors.services && <Field.ErrorText>{formErrors.services}</Field.ErrorText>}
+                  </Field.Root>
+                )}
+
+                <Box
+                  bg="white"
+                  border="1px solid"
+                  borderColor="gray.200"
+                  borderRadius="xl"
+                  p={4}
+                >
+                  <Flex justify="space-between" align="center" gap={3} flexWrap="wrap">
+                    <Box>
+                      <Text fontSize="sm" fontWeight="bold" color="gray.800">
+                        الإجمالي
+                      </Text>
+                      <Text fontSize="xs" color="gray.500" mt={1}>
+                        {selectedServices.length > 0
+                          ? `المختار: ${selectedServices.map((row) => row.name).join("، ")}`
+                          : "لم يتم اختيار خدمات بعد"}
+                      </Text>
+                    </Box>
+                    <Text fontSize="xl" fontWeight="bold" color="#615b36">
+                      {servicesTotal} EGP
+                    </Text>
+                  </Flex>
+                </Box>
+
                 <Field.Root
                   invalid={
                     !!(
@@ -1208,7 +1467,7 @@ export default function BookingModal({
                 >
                   <Field.Label fontSize="sm" color="gray.700" display="flex" alignItems="center" gap={2} mb={2}>
                     <CreditCard size={16} color="#615b36" />
-                    اختر طرق الدفع والمبلغ لكل طريقة
+                    طريقة الدفع
                   </Field.Label>
                   <SimpleGrid columns={{ base: 2, md: 4 }} gap={2} mb={3}>
                     {CLINIC_PAYMENT_OPTIONS.map((opt) => {
@@ -1312,7 +1571,7 @@ export default function BookingModal({
                       يمكنك اختيار أكثر من طريقة دفع وتحديد مبلغ لكل طريقة.
                     </Text>
                     <Text fontSize="sm" fontWeight="bold" color="#615b36">
-                      الإجمالي: {totalPaymentAmount} EGP
+                      المدفوع: {totalPaymentAmount} EGP
                     </Text>
                   </Flex>
                   {formErrors.amountPaid && <Field.ErrorText>{formErrors.amountPaid}</Field.ErrorText>}
@@ -1320,46 +1579,6 @@ export default function BookingModal({
                   {formErrors.transferFromPhone && (
                     <Field.ErrorText>{formErrors.transferFromPhone}</Field.ErrorText>
                   )}
-                </Field.Root>
-
-                <Field.Root invalid={!!formErrors.visitType}>
-                  <Field.Label fontSize="sm" color="gray.700" mb={2}>
-                    نوع الحجز / الخدمة (يمكن اختيار أكثر من نوع)
-                  </Field.Label>
-                  <Flex wrap="wrap" gap={2}>
-                    {BOOKING_SERVICES.map((service) => {
-                      const selected = selectedVisitTypes.includes(service);
-                      return (
-                        <Button
-                          key={service}
-                          type="button"
-                          size="sm"
-                          variant={selected ? "solid" : "outline"}
-                          bg={selected ? "#615b36" : "white"}
-                          color={selected ? "white" : "gray.700"}
-                          borderColor={selected ? "#615b36" : "gray.300"}
-                          _hover={{
-                            bg: selected ? "#4a452a" : "gray.50",
-                          }}
-                          onClick={() => toggleVisitType(service)}
-                          fontWeight="medium"
-                          borderRadius="full"
-                          px={4}
-                        >
-                          {service}
-                        </Button>
-                      );
-                    })}
-                  </Flex>
-                  {selectedVisitTypes.length > 0 && (
-                    <Text fontSize="xs" color="gray.500" mt={2}>
-                      المختار: {selectedVisitTypes.join("، ")}
-                      {selectedVisitTypes.includes("متابعة")
-                        ? " — يُرسل «متابعة» للسيرفر كـ «إعادة»"
-                        : ""}
-                    </Text>
-                  )}
-                  {formErrors.visitType && <Field.ErrorText>{formErrors.visitType}</Field.ErrorText>}
                 </Field.Root>
 
                 <Flex

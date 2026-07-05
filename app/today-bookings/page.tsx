@@ -39,12 +39,18 @@ import {
   UpdateBookingData,
   CLINIC_PAYMENT_OPTIONS,
   type ClinicPaymentMethod,
+  type BookingServiceItem,
+  type BookingPaymentDetailInput,
 } from "@/types/booking";
 import {
   formatBookingAmount,
   formatBookingTime,
   getPaymentInfo,
   getProcedureTypes,
+  getServiceItems,
+  getBookingIncomeForService,
+  getBookingServicePaymentShare,
+  getBookingAmountPaid,
   getVisitTypeLabel,
   hasBookingSpecificTime,
   matchesPaymentFilter,
@@ -549,14 +555,21 @@ export default function TodayBookings() {
 
   const totalIncome = useMemo(() => {
     if (!showTotalIncome) return 0;
-    return incomeSourceBookings.reduce((sum, b) => {
-      const amount =
-        typeof b.amountPaid === "string"
-          ? parseFloat(b.amountPaid)
-          : b.amountPaid;
-      return sum + (amount || 0);
-    }, 0);
-  }, [incomeSourceBookings, showTotalIncome]);
+    const serviceFilter = filterProcedure !== "all" ? filterProcedure : null;
+    return incomeSourceBookings.reduce(
+      (sum, booking) => sum + getBookingIncomeForService(booking, serviceFilter),
+      0,
+    );
+  }, [incomeSourceBookings, showTotalIncome, filterProcedure]);
+
+  const incomeRelevantBookingCount = useMemo(() => {
+    if (!showTotalIncome) return 0;
+    const serviceFilter = filterProcedure !== "all" ? filterProcedure : null;
+    if (!serviceFilter) return incomeSourceBookings.length;
+    return incomeSourceBookings.filter(
+      (booking) => getBookingIncomeForService(booking, serviceFilter) > 0,
+    ).length;
+  }, [incomeSourceBookings, showTotalIncome, filterProcedure]);
 
   const incomeByPaymentMethod = useMemo(() => {
     if (!showTotalIncome) return [];
@@ -564,8 +577,14 @@ export default function TodayBookings() {
       ClinicPaymentMethod | "none",
       { label: string; amount: number }
     >();
+    const serviceFilter = filterProcedure !== "all" ? filterProcedure : null;
 
     for (const booking of incomeSourceBookings) {
+      const share = serviceFilter
+        ? getBookingServicePaymentShare(booking, serviceFilter)
+        : 1;
+      if (share <= 0) continue;
+
       const details = Array.isArray(booking.paymentDetails)
         ? booking.paymentDetails
         : [];
@@ -579,7 +598,7 @@ export default function TodayBookings() {
               ?.label ||
             String(method);
           const current = map.get(method) ?? { label, amount: 0 };
-          current.amount += Number(payment.amount ?? 0);
+          current.amount += Number(payment.amount ?? 0) * share;
           map.set(method, current);
         }
         continue;
@@ -591,60 +610,92 @@ export default function TodayBookings() {
         CLINIC_PAYMENT_OPTIONS.find((opt) => opt.value === method)?.label ||
         "غير محدد";
       const current = map.get(method) ?? { label, amount: 0 };
-      current.amount +=
-        typeof booking.amountPaid === "string"
-          ? parseFloat(booking.amountPaid) || 0
-          : Number(booking.amountPaid ?? 0);
+      current.amount += getBookingAmountPaid(booking) * share;
       map.set(method, current);
     }
 
     return Array.from(map.values()).filter((row) => row.amount > 0);
-  }, [incomeSourceBookings, showTotalIncome]);
+  }, [incomeSourceBookings, showTotalIncome, filterProcedure]);
 
   function buildClinicPayload(
     data: CreateClinicBookingData,
     allowExtraBooking = false,
   ): Record<string, unknown> {
-    const procedureTypes = data.procedureTypes ?? data.visitTypes ?? [];
-    const paymentAmount = Number(data.amountPaid ?? 0);
-    const payments =
-      Array.isArray(data.payments) && data.payments.length > 0
-        ? data.payments.map((payment) => ({
+    const services: BookingServiceItem[] =
+      Array.isArray(data.services) && data.services.length > 0
+        ? data.services.map((service) => ({
+            name: String(service.name ?? "").trim(),
+            price: Number(service.price ?? 0),
+          }))
+        : (data.procedureTypes ?? data.visitTypes ?? []).map((name) => ({
+            name: String(name),
+            price: Number(data.amountPaid ?? 0),
+          }));
+
+    const paymentDetails: BookingPaymentDetailInput[] =
+      Array.isArray(data.paymentDetails) && data.paymentDetails.length > 0
+        ? data.paymentDetails.map((payment) => ({
             method: payment.method,
             amount: Number(payment.amount),
             ...(payment.transferFromPhone
               ? { transferFromPhone: payment.transferFromPhone.replace(/\D/g, "") }
               : {}),
           }))
-        : [];
+        : Array.isArray(data.payments) && data.payments.length > 0
+          ? data.payments.map((payment) => ({
+              method: payment.method,
+              amount: Number(payment.amount),
+              ...(payment.transferFromPhone
+                ? { transferFromPhone: payment.transferFromPhone.replace(/\D/g, "") }
+                : {}),
+            }))
+          : data.paymentMethod && data.amountPaid != null
+            ? [
+                {
+                  method: data.paymentMethod,
+                  amount: Number(data.amountPaid),
+                  ...(data.transferFromPhone
+                    ? { transferFromPhone: data.transferFromPhone.replace(/\D/g, "") }
+                    : {}),
+                },
+              ]
+            : [];
+
+    const paymentAmount = paymentDetails.reduce(
+      (sum, payment) => sum + Number(payment.amount ?? 0),
+      0,
+    );
+
     const payload: Record<string, unknown> = {
       name: data.name,
       phone: data.phone,
       ...(data.age != null ? { age: data.age } : {}),
       date: data.date,
       doctorId: data.doctorId,
-      procedureTypes,
+      services,
+      paymentDetails,
       noTime: data.noTime === true,
       allowExtraBooking: allowExtraBooking || data.allowExtraBooking === true,
       clientRequestId:
         data.clientRequestId ??
         `clinic-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
     };
-    if (payments.length > 1) {
-      payload.payments = payments;
-    } else {
-      const singlePayment = payments[0];
-      payload.paymentMethod = data.paymentMethod ?? singlePayment?.method;
-      payload.amountPaid = Number.isFinite(paymentAmount) ? paymentAmount : 0;
-      const transferFromPhone =
-        data.transferFromPhone ?? singlePayment?.transferFromPhone;
-      if (transferFromPhone) {
-        payload.transferFromPhone = transferFromPhone.replace(/\D/g, "");
+
+    if (paymentDetails.length === 1) {
+      const singlePayment = paymentDetails[0];
+      payload.paymentMethod = singlePayment.method;
+      payload.amountPaid = paymentAmount;
+      if (singlePayment.transferFromPhone) {
+        payload.transferFromPhone = singlePayment.transferFromPhone;
       }
+    } else if (paymentAmount > 0) {
+      payload.amountPaid = paymentAmount;
     }
+
     if (!data.noTime && data.time) {
       payload.time = data.time;
     }
+
     return payload;
   }
 
@@ -772,14 +823,24 @@ export default function TodayBookings() {
   };
 
   const handleSaveBooking = async (data: any) => {
+    const services: BookingServiceItem[] | undefined = Array.isArray(data.services)
+      ? data.services
+      : undefined;
+    const paymentDetails: BookingPaymentDetailInput[] | undefined = Array.isArray(
+      data.paymentDetails,
+    )
+      ? data.paymentDetails
+      : Array.isArray(data.payments)
+        ? data.payments
+        : undefined;
     const procedureTypes = Array.isArray(data.procedureTypes)
       ? data.procedureTypes
       : Array.isArray(data.visitTypes)
         ? data.visitTypes
-        : undefined;
+        : services?.map((service) => service.name);
     const noTime = data.noTime === true;
     if (editingBooking) {
-      const updatePayload: UpdateBookingData & { procedureTypes?: string[] } = {
+      const updatePayload: UpdateBookingData = {
         name: data.name ?? data.customerName,
         phone: data.phone ?? data.customerPhone,
         age:
@@ -796,6 +857,8 @@ export default function TodayBookings() {
             ? data.transferFromPhone.replace(/\D/g, "")
             : undefined,
         payments: Array.isArray(data.payments) ? data.payments : undefined,
+        paymentDetails,
+        services,
         visitTypes: procedureTypes,
         ...(data.visitType != null ? { visitType: data.visitType } : {}),
       };
@@ -825,30 +888,15 @@ export default function TodayBookings() {
       payments:
         Array.isArray(data.payments) && data.payments.length > 0
           ? data.payments
-          : data.paymentMethod && data.amountPaid != null
-            ? [
-                {
-                  method: data.paymentMethod,
-                  amount:
-                    typeof data.amountPaid === "string"
-                      ? parseInt(data.amountPaid, 10)
-                      : data.amountPaid,
-                  ...(typeof data.transferFromPhone === "string" &&
-                  data.transferFromPhone
-                    ? { transferFromPhone: data.transferFromPhone.replace(/\D/g, "") }
-                    : {}),
-                },
-              ]
-            : undefined,
+          : undefined,
+      paymentDetails,
+      services,
       procedureTypes,
       visitTypes: procedureTypes,
       noTime,
       allowExtraBooking: false,
       clientRequestId: `clinic-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
       ...(noTime ? {} : { time: data.time ?? data.timeSlot }),
-      ...(editingBooking && data.visitType != null
-        ? { visitType: data.visitType }
-        : {}),
     };
     await handleCreateBooking(normalized);
   };
@@ -1252,6 +1300,33 @@ export default function TodayBookings() {
   };
 
   const renderProcedureTags = (booking: Booking, compact = false) => {
+    const serviceItems = getServiceItems(booking);
+    if (serviceItems.length > 0) {
+      return (
+        <Flex wrap="wrap" gap={1.5}>
+          {serviceItems.map((item) => (
+            <Badge
+              key={`${booking.id}-${item.name}`}
+              variant="subtle"
+              bg="#f4f3ed"
+              color="#615b36"
+              border="1px solid"
+              borderColor="#e8e4d4"
+              fontSize="xs"
+              px={2}
+              py={0.5}
+              rounded="md"
+              fontWeight="medium"
+            >
+              {item.price > 0
+                ? `${item.name}: ${formatBookingAmount(item.price)} ج.م`
+                : item.name}
+            </Badge>
+          ))}
+        </Flex>
+      );
+    }
+
     const types = getProcedureTypes(booking);
     if (types.length === 0) {
       return (
@@ -1690,7 +1765,13 @@ export default function TodayBookings() {
           booking.slotDate || booking.appointmentDate?.slice(0, 10) || "",
           formatBookingTime(booking),
           getBookingTypeLabel(booking.bookingType),
-          getProcedureTypes(booking).join("، "),
+          getServiceItems(booking)
+            .map((item) =>
+              item.price > 0
+                ? `${item.name}: ${formatBookingAmount(item.price)} EGP`
+                : item.name,
+            )
+            .join("، ") || getProcedureTypes(booking).join("، "),
           getStatusLabel(booking.status),
           getExaminationStatusLabel(booking.examinationStatus),
           `${formatBookingAmount(booking.amountPaid)} EGP`,
@@ -2297,7 +2378,7 @@ export default function TodayBookings() {
                   </Box>
                   <Box>
                     <Text fontSize="xs" color="gray.500" fontWeight="medium">
-                      إجمالي الدخل
+                      {filterProcedure !== "all" ? "إجمالي الدخل للخدمة" : "إجمالي الدخل"}
                     </Text>
                     {isIncomeLoading ? (
                       <Flex align="center" gap={2} color="#666139" mt={1}>
@@ -2312,7 +2393,9 @@ export default function TodayBookings() {
                           {formatBookingAmount(totalIncome)} EGP
                         </Text>
                         <Text fontSize="xs" color="gray.500">
-                          محسوب على {incomeSourceBookings.length} حجز
+                          {filterProcedure !== "all"
+                            ? `محسوب لخدمة «${filterProcedure}» — ${incomeRelevantBookingCount} حجز`
+                            : `محسوب على ${incomeRelevantBookingCount} حجز`}
                         </Text>
                       </>
                     )}
@@ -3178,7 +3261,9 @@ export default function TodayBookings() {
           <Flex justify="space-between" borderTop="1px dashed gray" pt={4}>
             <Text>إجمالي الحجوزات: {effectiveTotal}</Text>
             <Text fontWeight="bold">
-              إجمالي الدخل: {totalIncome.toFixed(2)} EGP
+              {filterProcedure !== "all"
+                ? `إجمالي دخل «${filterProcedure}»: ${totalIncome.toFixed(2)} EGP`
+                : `إجمالي الدخل: ${totalIncome.toFixed(2)} EGP`}
             </Text>
           </Flex>
         </Box>

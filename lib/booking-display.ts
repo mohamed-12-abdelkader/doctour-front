@@ -2,13 +2,62 @@ import {
   Booking,
   CLINIC_PAYMENT_OPTIONS,
   type ClinicPaymentMethod,
+  type BookingServiceItem,
 } from "@/types/booking";
 
 export type PaymentFilterValue = "all" | "none" | ClinicPaymentMethod;
 
+export function getServiceItems(booking: Booking): Array<{ name: string; price: number }> {
+  if (Array.isArray(booking.serviceItems) && booking.serviceItems.length > 0) {
+    return booking.serviceItems
+      .map((item) => ({
+        name: String(item.name ?? "").trim(),
+        price: Number(item.price ?? 0),
+      }))
+      .filter((item) => item.name);
+  }
+
+  const raw = booking.procedureTypes;
+  if (Array.isArray(raw) && raw.length > 0 && typeof raw[0] === "object") {
+    return raw
+      .map((item) => {
+        const row = item as BookingServiceItem;
+        return {
+          name: String(row.name ?? "").trim(),
+          price: Number(row.price ?? 0),
+        };
+      })
+      .filter((item) => item.name);
+  }
+
+  return [];
+}
+
+export function getBookingServicesTotal(booking: Booking): number | null {
+  if (booking.servicesTotal != null && booking.servicesTotal !== "") {
+    const n = Number(booking.servicesTotal);
+    if (Number.isFinite(n)) return n;
+  }
+  if (booking.totalAmount != null && booking.totalAmount !== "") {
+    const n = Number(booking.totalAmount);
+    if (Number.isFinite(n)) return n;
+  }
+  const items = getServiceItems(booking).filter((item) => item.price > 0);
+  if (items.length === 0) return null;
+  return items.reduce((sum, item) => sum + item.price, 0);
+}
+
 export function getProcedureTypes(booking: Booking): string[] {
+  const fromServiceItems = getServiceItems(booking).map((item) => item.name);
+  if (fromServiceItems.length > 0) return fromServiceItems;
+
   const raw = booking.procedureTypes;
   if (Array.isArray(raw) && raw.length > 0) {
+    if (typeof raw[0] === "object") {
+      return raw
+        .map((item) => String((item as BookingServiceItem).name ?? "").trim())
+        .filter(Boolean);
+    }
     return raw.map((s) => String(s).trim()).filter(Boolean);
   }
   const single = booking.procedureType?.trim();
@@ -108,6 +157,70 @@ export function formatBookingTime(booking: Booking): string {
 export function formatBookingAmount(amount: string | number): string {
   const num = typeof amount === "string" ? parseFloat(amount) : amount;
   return Number.isFinite(num) ? num.toFixed(0) : "0";
+}
+
+function normalizeServiceCompare(name: string): string {
+  return String(name ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[أإآ]/g, "ا")
+    .replace(/ى/g, "ي")
+    .replace(/ة/g, "ه");
+}
+
+export function getBookingAmountPaid(booking: Booking): number {
+  return typeof booking.amountPaid === "string"
+    ? parseFloat(booking.amountPaid) || 0
+    : Number(booking.amountPaid ?? 0);
+}
+
+/** دخل حجز واحد — كامل المبلغ أو سعر خدمة محددة فقط */
+export function getBookingIncomeForService(
+  booking: Booking,
+  serviceName?: string | null,
+): number {
+  const amountPaid = getBookingAmountPaid(booking);
+  if (!serviceName || serviceName === "all") return amountPaid;
+
+  const target = normalizeServiceCompare(serviceName);
+  const pricedItems = getServiceItems(booking).filter((item) => item.price > 0);
+
+  if (pricedItems.length > 0) {
+    const match = pricedItems.find(
+      (item) => normalizeServiceCompare(item.name) === target,
+    );
+    return match?.price ?? 0;
+  }
+
+  const procedures = getProcedureTypes(booking);
+  const hasService = procedures.some(
+    (name) => normalizeServiceCompare(name) === target,
+  );
+  if (!hasService) return 0;
+  if (procedures.length === 1) return amountPaid;
+  return amountPaid / procedures.length;
+}
+
+/** نسبة المدفوعات المرتبطة بخدمة محددة — لتقسيم طرق الدفع */
+export function getBookingServicePaymentShare(
+  booking: Booking,
+  serviceName: string,
+): number {
+  const serviceIncome = getBookingIncomeForService(booking, serviceName);
+  if (serviceIncome <= 0) return 0;
+
+  const pricedItems = getServiceItems(booking).filter((item) => item.price > 0);
+  const servicesTotal =
+    getBookingServicesTotal(booking) ??
+    pricedItems.reduce((sum, item) => sum + item.price, 0);
+
+  if (servicesTotal > 0 && pricedItems.length > 0) {
+    return serviceIncome / servicesTotal;
+  }
+
+  const amountPaid = getBookingAmountPaid(booking);
+  if (amountPaid <= 0) return 0;
+  return serviceIncome / amountPaid;
 }
 
 export function matchesPaymentFilter(

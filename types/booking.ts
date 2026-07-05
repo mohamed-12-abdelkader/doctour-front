@@ -16,6 +16,17 @@ export const CLINIC_PAYMENT_OPTIONS: {
 ];
 export type ExaminationStatus = 'waiting' | 'done';
 
+export interface BookingServiceItem {
+    name: string;
+    price: number;
+}
+
+export interface BookingPaymentDetailInput {
+    method: ClinicPaymentMethod;
+    amount: number;
+    transferFromPhone?: string;
+}
+
 export interface BookingActionUser {
     id?: number | string;
     name?: string | null;
@@ -65,8 +76,12 @@ export interface Booking {
     visitType?: VisitType | string;
     /** نوع الإجراء/الخدمة (clinic) — نص مجمّع */
     procedureType?: string | null;
-    /** أنواع الإجراءات من الـ API */
-    procedureTypes?: string[] | null;
+    /** أنواع الإجراءات من الـ API — نص أو كائنات مع السعر */
+    procedureTypes?: Array<string | BookingServiceItem> | null;
+    /** الخدمات مع السعر — الحجوزات الجديدة */
+    serviceItems?: BookingServiceItem[] | null;
+    servicesTotal?: number | string | null;
+    totalAmount?: number | string | null;
     appointmentTime?: string | null;
     appointmentTime24?: string | null;
     /** false = حجز لليوم بدون وقت محدد */
@@ -110,11 +125,14 @@ export interface CreateClinicBookingData {
         transferFromPhone?: string;
     }>;
     clientRequestId?: string;
-    /** أنواع الإجراء/الخدمة */
+    /** الخدمات مع السعر — الصيغة المفضلة للـ API */
+    services?: BookingServiceItem[];
+    paymentDetails?: BookingPaymentDetailInput[];
+    /** أنواع الإجراء/الخدمة — توافق قديم */
     procedureTypes?: string[];
     /** عدة أنواع — متابعة تُرسل كـ «إعادة» */
     visitTypes?: string[];
-    /** @deprecated للتوافق — يُفضّل procedureTypes */
+    /** @deprecated للتوافق — يُفضّل services */
     visitType?: VisitType | string;
 }
 
@@ -134,6 +152,8 @@ export interface UpdateBookingData {
         amount: number;
         transferFromPhone?: string;
     }>;
+    services?: BookingServiceItem[];
+    paymentDetails?: BookingPaymentDetailInput[];
     procedureTypes?: string[];
     visitType?: VisitType | string;
     visitTypes?: string[];

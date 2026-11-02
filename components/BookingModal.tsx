@@ -814,8 +814,11 @@ export default function BookingModal({
       }
     }
 
-    if (servicesTotal > 0 && totalPaymentAmount > servicesTotal) {
-      errors.amountPaid = "المبلغ المدفوع لا يمكن أن يكون أكبر من إجمالي الخدمات";
+    if (
+      servicesTotal > 0 &&
+      Math.abs(totalPaymentAmount - servicesTotal) > 0.009
+    ) {
+      errors.amountPaid = "المبلغ المدفوع لازم يساوي إجمالي الخدمات. كل حجز يتدفع بالكامل.";
     }
 
     return errors;

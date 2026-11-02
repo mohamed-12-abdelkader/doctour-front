@@ -48,8 +48,6 @@ import {
   getPaymentInfo,
   getProcedureTypes,
   getServiceItems,
-  getBookingIncomeForService,
-  getBookingServicePaymentShare,
   getBookingAmountPaid,
   getVisitTypeLabel,
   hasBookingSpecificTime,
@@ -140,7 +138,11 @@ export default function TodayBookings() {
   const [canSelectDoctor, setCanSelectDoctor] = useState(false);
   const [canManageExamination, setCanManageExamination] = useState(false);
   const [showTotalIncome, setShowTotalIncome] = useState(false);
-  const [incomeBookings, setIncomeBookings] = useState<Booking[] | null>(null);
+  const [incomeSummary, setIncomeSummary] = useState<{
+    totalIncome: number;
+    totalBookings: number;
+    paymentBreakdown: Array<{ label?: string; method?: string; amount?: number }>;
+  } | null>(null);
   const [isIncomeLoading, setIsIncomeLoading] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(
@@ -347,31 +349,50 @@ export default function TodayBookings() {
   ]);
 
   useEffect(() => {
-    if (!showTotalIncome || !activeServerPaginated) {
-      setIncomeBookings(null);
+    if (!showTotalIncome) {
+      setIncomeSummary(null);
       setIsIncomeLoading(false);
       return;
     }
 
     let cancelled = false;
-    const loadIncomeBookings = async () => {
+    const loadIncomeSummary = async () => {
       setIsIncomeLoading(true);
       try {
-        const response = await api.get("/bookings/all", {
-          params: buildAllBookingsParams(10000),
-        });
+        const params: Record<string, string | number> = {};
+        if (filterType !== "all") params.type = filterType;
+        if (filterStatus === "cancelled") params.status = "cancelled";
+        if (filterStatus === "pending") params.examinationStatus = "waiting";
+        if (filterStatus === "examined") params.examinationStatus = "done";
+        if (rangeStart === rangeEnd) params.date = rangeStart;
+        else {
+          params.startDate = rangeStart;
+          params.endDate = rangeEnd;
+        }
+        if (selectedDoctorId) params.doctorId = selectedDoctorId;
+        if (filterProcedure !== "all") params.procedure = filterProcedure;
+        if (filterPaymentMethod !== "all" && filterPaymentMethod !== "none") {
+          params.paymentMethod = filterPaymentMethod;
+        }
+        if (debouncedSearchQuery.trim()) params.search = debouncedSearchQuery.trim();
+
+        const response = await api.get("/bookings/income-summary", { params });
         if (cancelled) return;
-        const data = response.data;
-        const nextBookings = Array.isArray(data) ? data : (data.bookings ?? []);
-        setIncomeBookings(Array.isArray(nextBookings) ? nextBookings : []);
+        setIncomeSummary({
+          totalIncome: Number(response.data?.totalIncome ?? 0),
+          totalBookings: Number(response.data?.totalBookings ?? 0),
+          paymentBreakdown: Array.isArray(response.data?.paymentBreakdown)
+            ? response.data.paymentBreakdown
+            : [],
+        });
       } catch (error: any) {
         if (!cancelled) {
-          setIncomeBookings([]);
+          setIncomeSummary(null);
           toaster.create({
             title: "تعذر حساب إجمالي الدخل",
             description:
               error.response?.data?.message ||
-              "حدث خطأ أثناء جلب كل الحجوزات لحساب الرصيد.",
+              "حدث خطأ أثناء حساب دخل الحجوزات.",
             type: "error",
             duration: 3000,
           });
@@ -381,16 +402,17 @@ export default function TodayBookings() {
       }
     };
 
-    void loadIncomeBookings();
-
+    void loadIncomeSummary();
     return () => {
       cancelled = true;
     };
   }, [
     showTotalIncome,
-    activeServerPaginated,
     filterType,
     filterStatus,
+    filterProcedure,
+    filterPaymentMethod,
+    debouncedSearchQuery,
     rangeStart,
     rangeEnd,
     selectedDoctorId,
@@ -548,74 +570,13 @@ export default function TodayBookings() {
     [indexedBookings],
   );
 
-  const incomeSourceBookings =
-    activeServerPaginated && showTotalIncome
-      ? (incomeBookings ?? [])
-      : filteredBookings;
-
-  const totalIncome = useMemo(() => {
-    if (!showTotalIncome) return 0;
-    const serviceFilter = filterProcedure !== "all" ? filterProcedure : null;
-    return incomeSourceBookings.reduce(
-      (sum, booking) => sum + getBookingIncomeForService(booking, serviceFilter),
-      0,
-    );
-  }, [incomeSourceBookings, showTotalIncome, filterProcedure]);
-
-  const incomeRelevantBookingCount = useMemo(() => {
-    if (!showTotalIncome) return 0;
-    const serviceFilter = filterProcedure !== "all" ? filterProcedure : null;
-    if (!serviceFilter) return incomeSourceBookings.length;
-    return incomeSourceBookings.filter(
-      (booking) => getBookingIncomeForService(booking, serviceFilter) > 0,
-    ).length;
-  }, [incomeSourceBookings, showTotalIncome, filterProcedure]);
-
-  const incomeByPaymentMethod = useMemo(() => {
-    if (!showTotalIncome) return [];
-    const map = new Map<
-      ClinicPaymentMethod | "none",
-      { label: string; amount: number }
-    >();
-    const serviceFilter = filterProcedure !== "all" ? filterProcedure : null;
-
-    for (const booking of incomeSourceBookings) {
-      const share = serviceFilter
-        ? getBookingServicePaymentShare(booking, serviceFilter)
-        : 1;
-      if (share <= 0) continue;
-
-      const details = Array.isArray(booking.paymentDetails)
-        ? booking.paymentDetails
-        : [];
-
-      if (details.length > 0) {
-        for (const payment of details) {
-          const method = payment.method ?? "none";
-          const label =
-            payment.methodLabel ||
-            CLINIC_PAYMENT_OPTIONS.find((opt) => opt.value === method)
-              ?.label ||
-            String(method);
-          const current = map.get(method) ?? { label, amount: 0 };
-          current.amount += Number(payment.amount ?? 0) * share;
-          map.set(method, current);
-        }
-        continue;
-      }
-
-      const method = booking.paymentMethod ?? "none";
-      const label =
-        booking.paymentMethodLabel ||
-        CLINIC_PAYMENT_OPTIONS.find((opt) => opt.value === method)?.label ||
-        "غير محدد";
-      const current = map.get(method) ?? { label, amount: 0 };
-      current.amount += getBookingAmountPaid(booking) * share;
-      map.set(method, current);
-    }
-
-    return Array.from(map.values()).filter((row) => row.amount > 0);
-  }, [incomeSourceBookings, showTotalIncome, filterProcedure]);
+  const totalIncome = showTotalIncome ? Number(incomeSummary?.totalIncome ?? 0) : 0;
+  const incomeRelevantBookingCount = showTotalIncome
+    ? Number(incomeSummary?.totalBookings ?? 0)
+    : 0;
+  const incomeByPaymentMethod = showTotalIncome
+    ? (incomeSummary?.paymentBreakdown ?? []).filter((row) => Number(row.amount ?? 0) > 0)
+    : [];
 
   function buildClinicPayload(
     data: CreateClinicBookingData,
@@ -2394,8 +2355,8 @@ export default function TodayBookings() {
                         </Text>
                         <Text fontSize="xs" color="gray.500">
                           {filterProcedure !== "all"
-                            ? `محسوب لخدمة «${filterProcedure}» — ${incomeRelevantBookingCount} حجز`
-                            : `محسوب على ${incomeRelevantBookingCount} حجز`}
+                            ? `دخل «${filterProcedure}» من ${incomeRelevantBookingCount} حجز مؤكد`
+                            : `كل الحجوزات المؤكدة في الفترة — ${incomeRelevantBookingCount} حجز`}
                         </Text>
                       </>
                     )}

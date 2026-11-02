@@ -103,20 +103,39 @@ export interface ExpenseEntry {
     subcategory?: ExpenseSubcategory;
     createdAt?: string;
 }
+export interface ExpenseBreakdownRow {
+    categoryId?: number | null;
+    subcategoryId?: number | null;
+    name: string;
+    amount: number;
+    count: number;
+    subcategories?: ExpenseBreakdownRow[];
+}
+
 export interface ExpensesResponse {
     period: string;
+    startDate?: string;
+    endDate?: string;
     expenses: ExpenseEntry[];
     total: number;
+    byCategory?: ExpenseBreakdownRow[];
 }
 
 // API: GET /accounts/summary
 export interface AccountsSummaryResponse {
     period: string;
+    startDate?: string;
+    endDate?: string;
+    bookingCount?: number;
     incomeFromBookings: number;
     manualIncome: number;
+    manualIncomeEntries?: ManualIncomeEntry[];
     totalIncome: number;
     totalExpenses: number;
+    netProfit?: number;
     balance: number;
+    expensesByCategory?: ExpenseBreakdownRow[];
+    paymentBreakdown?: Array<{ method?: string; label?: string; amount?: number; count?: number }>;
     incomeFromBookingsByDoctor?: BookingIncomeByDoctorRow[];
     /** يوضح أن التوزيع بالطبيب للحجوزات فقط، واليدوي/المصروفات على مستوى العيادة */
     note?: string;

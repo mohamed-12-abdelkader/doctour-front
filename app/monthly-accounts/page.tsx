@@ -39,6 +39,7 @@ import {
 } from 'lucide-react'
 import {
     ExpensesResponse,
+    AccountsSummaryResponse,
     AddExpenseBody,
     ExpenseCategory,
     ExpenseSubcategory,
@@ -308,6 +309,7 @@ export default function MonthlyAccountsPage() {
     const [endMonth, setEndMonth] = useState<string>(getCurrentMonth())
 
     const [expenses, setExpenses] = useState<ExpensesResponse | null>(null)
+    const [accountSummary, setAccountSummary] = useState<AccountsSummaryResponse | null>(null)
     const [financialReport, setFinancialReport] = useState<FinancialReportResponse | null>(null)
     const [financialCases, setFinancialCases] = useState<FinancialCasesResponse | null>(null)
     const [isLoading, setIsLoading] = useState(true)
@@ -362,25 +364,22 @@ export default function MonthlyAccountsPage() {
     const [creatingSubFor, setCreatingSubFor] = useState<number | null>(null)
     const [deletingId, setDeletingId] = useState<{ kind: 'cat' | 'sub'; id: number } | null>(null)
 
-    /** معاملات الفترة للواجهات القديمة مثل المصروفات. */
-    const periodParams = useMemo(() => {
-        if (periodMode === 'day') return dayDate ? { startDate: dayDate, endDate: dayDate } : {}
-        if (periodMode === 'week') {
-            const range = getWeekRange(weekDate)
-            return range ?? {}
+    /** نفس بداية ونهاية الفترة للدخل والمصروفات وصافي الربح. */
+    const resolvedRange = useMemo(() => {
+        if (periodMode === 'day') return dayDate ? { startDate: dayDate, endDate: dayDate } : null
+        if (periodMode === 'week') return getWeekRange(weekDate)
+        if (periodMode === 'month' && month) {
+            const [year, monthNumber] = month.split('-').map(Number)
+            const lastDay = new Date(year, monthNumber, 0).getDate()
+            return {
+                startDate: `${month}-01`,
+                endDate: `${month}-${String(lastDay).padStart(2, '0')}`,
+            }
         }
-        if (periodMode === 'month') return month ? { month } : {}
-        if (periodMode === 'days') return startDate && endDate ? { startDate, endDate } : {}
-        if (periodMode === 'months') return startMonth && endMonth ? { startMonth, endMonth } : {}
-        return {}
-    }, [periodMode, dayDate, weekDate, month, startDate, endDate, startMonth, endMonth])
-
-    const financialPeriodParams = useMemo(() => {
-        if (periodMode === 'day') return dayDate ? { date: dayDate } : {}
-        if (periodMode === 'week') return weekDate ? { period: 'week', date: weekDate } : {}
-        if (periodMode === 'month') return month ? { month } : {}
-        if (periodMode === 'days') return startDate && endDate ? { startDate, endDate } : {}
-        if (periodMode === 'months' && startMonth && endMonth) {
+        if (periodMode === 'days' && startDate && endDate && startDate <= endDate) {
+            return { startDate, endDate }
+        }
+        if (periodMode === 'months' && startMonth && endMonth && startMonth <= endMonth) {
             const [endYear, endMonthNumber] = endMonth.split('-').map(Number)
             const lastDay = new Date(endYear, endMonthNumber, 0).getDate()
             return {
@@ -388,17 +387,12 @@ export default function MonthlyAccountsPage() {
                 endDate: `${endMonth}-${String(lastDay).padStart(2, '0')}`,
             }
         }
-        return {}
+        return null
     }, [periodMode, dayDate, weekDate, month, startDate, endDate, startMonth, endMonth])
 
-    const financialCasesPeriodParams = useMemo(() => {
-        if (periodMode === 'day') return dayDate ? { date: dayDate } : {}
-        if (periodMode === 'week') {
-            const range = getWeekRange(weekDate)
-            return range ?? {}
-        }
-        return financialPeriodParams
-    }, [periodMode, dayDate, weekDate, financialPeriodParams])
+    const periodParams = useMemo(() => resolvedRange ?? {}, [resolvedRange])
+    const financialPeriodParams = periodParams
+    const financialCasesPeriodParams = periodParams
 
     /** أولوية الـ backend: نطاق أيام صالح | نطاق شهور صالح | غير ذلك شهر واحد (أو الشهر الحالي إن لم يُرسل month) */
     const periodValidationError = useMemo(() => {
@@ -450,8 +444,9 @@ export default function MonthlyAccountsPage() {
         setIsLoading(true)
         try {
             await api.get<{ message?: string }>('/accounts')
-            const [expensesRes, financialReportRes, financialCasesRes] = await Promise.all([
+            const [expensesRes, summaryRes, financialReportRes, financialCasesRes] = await Promise.all([
                 api.get<ExpensesResponse>('/accounts/expenses', { params: periodParams }),
+                api.get<AccountsSummaryResponse>('/accounts/summary', { params: periodParams }),
                 api.get<FinancialReportResponse>('/accounts/financial-report', {
                     params: financialPeriodParams,
                 }),
@@ -460,11 +455,13 @@ export default function MonthlyAccountsPage() {
                 }),
             ])
             setExpenses(expensesRes.data)
+            setAccountSummary(summaryRes.data)
             setFinancialReport(financialReportRes.data)
             setFinancialCases(financialCasesRes.data)
             setFinancialCasesPage(1)
         } catch (error: unknown) {
             setExpenses(null)
+            setAccountSummary(null)
             setFinancialReport(null)
             setFinancialCases(null)
             const status = (error as { response?: { status?: number } })?.response?.status
@@ -787,15 +784,6 @@ export default function MonthlyAccountsPage() {
         Math.round(typeof n === 'number' ? n : parseFloat(String(n ?? 0)) || 0).toString()
     const formatDate = (d: string) => new Date(d).toLocaleDateString('ar-EG', { year: 'numeric', month: 'short', day: 'numeric' })
 
-    const paymentStatusColor = (status?: string) => {
-        if (status === 'paid') return 'green'
-        if (status === 'partial' || status === 'outstanding') return 'orange'
-        if (status === 'unpaid') return 'red'
-        if (status === 'overpaid') return 'purple'
-        if (status === 'zero_due') return 'gray'
-        return 'gray'
-    }
-
     const paymentBreakdownRows = useMemo(
         () =>
             financialReport?.charts?.paymentMethodDistribution ??
@@ -803,6 +791,13 @@ export default function MonthlyAccountsPage() {
             [],
         [financialReport],
     )
+    const paymentBreakdownTotal = useMemo(
+        () => paymentBreakdownRows.reduce((sum, row) => sum + Number(row.amount ?? 0), 0),
+        [paymentBreakdownRows],
+    )
+    const paymentBreakdownMatchesIncome = Math.abs(
+        paymentBreakdownTotal - Number(financialReport?.cards?.totalIncome ?? financialReport?.summary?.totalCollected ?? 0),
+    ) < 0.05
 
     const doctorRows = useMemo(
         () =>
@@ -979,6 +974,148 @@ export default function MonthlyAccountsPage() {
                     </Flex>
                 ) : (
                     <>
+                        {accountSummary && (
+                            <Card.Root bg="white" shadow="lg" borderRadius="2xl" overflow="hidden" mb={8}>
+                                <Box bg="#1f2937" px={{ base: 4, md: 6 }} py={5}>
+                                    <Heading size="lg" color="white">ملخص الفترة</Heading>
+                                    <Text color="whiteAlpha.800" fontSize="sm" mt={1}>
+                                        صافي الربح = دخل الحجوزات + الدخل اليدوي − المصروفات
+                                        {accountSummary.startDate ? ` · ${accountSummary.startDate}` : ''}
+                                        {accountSummary.endDate && accountSummary.endDate !== accountSummary.startDate
+                                            ? ` — ${accountSummary.endDate}`
+                                            : ''}
+                                    </Text>
+                                </Box>
+                                <Card.Body p={{ base: 4, md: 6 }}>
+                                    <SimpleGrid columns={{ base: 1, sm: 2, lg: 5 }} gap={4} mb={6}>
+                                        <Box p={4} bg="green.50" borderRadius="xl" borderWidth="1px" borderColor="green.100">
+                                            <Text fontSize="xs" color="gray.600" fontWeight="bold">دخل الحجوزات</Text>
+                                            <Text fontSize="xl" fontWeight="bold" color="green.700" mt={1}>
+                                                {formatAmount(accountSummary.incomeFromBookings)} EGP
+                                            </Text>
+                                            <Text fontSize="xs" color="gray.500" mt={1}>
+                                                {accountSummary.bookingCount ?? 0} حجز مؤكد
+                                            </Text>
+                                        </Box>
+                                        <Box p={4} bg="teal.50" borderRadius="xl" borderWidth="1px" borderColor="teal.100">
+                                            <Text fontSize="xs" color="gray.600" fontWeight="bold">الدخل اليدوي</Text>
+                                            <Text fontSize="xl" fontWeight="bold" color="teal.700" mt={1}>
+                                                {formatAmount(accountSummary.manualIncome)} EGP
+                                            </Text>
+                                            <Text fontSize="xs" color="gray.500" mt={1}>
+                                                {(accountSummary.manualIncomeEntries ?? []).length} عملية
+                                            </Text>
+                                        </Box>
+                                        <Box p={4} bg="#f4f3ed" borderRadius="xl" borderWidth="1px" borderColor="#e8e4d4">
+                                            <Text fontSize="xs" color="gray.600" fontWeight="bold">إجمالي الدخل</Text>
+                                            <Text fontSize="xl" fontWeight="bold" color="#615b36" mt={1}>
+                                                {formatAmount(accountSummary.totalIncome)} EGP
+                                            </Text>
+                                        </Box>
+                                        <Box p={4} bg="red.50" borderRadius="xl" borderWidth="1px" borderColor="red.100">
+                                            <Text fontSize="xs" color="gray.600" fontWeight="bold">المصروفات</Text>
+                                            <Text fontSize="xl" fontWeight="bold" color="red.700" mt={1}>
+                                                {formatAmount(accountSummary.totalExpenses)} EGP
+                                            </Text>
+                                        </Box>
+                                        <Box
+                                            p={4}
+                                            bg={Number(accountSummary.netProfit ?? accountSummary.balance) >= 0 ? 'green.50' : 'orange.50'}
+                                            borderRadius="xl"
+                                            borderWidth="1px"
+                                            borderColor={Number(accountSummary.netProfit ?? accountSummary.balance) >= 0 ? 'green.200' : 'orange.200'}
+                                        >
+                                            <Text fontSize="xs" color="gray.600" fontWeight="bold">صافي الربح</Text>
+                                            <Text
+                                                fontSize="xl"
+                                                fontWeight="bold"
+                                                color={Number(accountSummary.netProfit ?? accountSummary.balance) >= 0 ? 'green.800' : 'orange.700'}
+                                                mt={1}
+                                            >
+                                                {formatAmount(accountSummary.netProfit ?? accountSummary.balance)} EGP
+                                            </Text>
+                                        </Box>
+                                    </SimpleGrid>
+
+                                    <SimpleGrid columns={{ base: 1, lg: 2 }} gap={4}>
+                                        <Box borderWidth="1px" borderColor="gray.100" borderRadius="xl" p={4}>
+                                            <Text fontWeight="bold" color="gray.800" mb={3}>تفاصيل دخل الحجوزات</Text>
+                                            <Stack gap={2}>
+                                                {(accountSummary.paymentBreakdown ?? [])
+                                                    .filter((row) => Number(row.amount ?? 0) > 0)
+                                                    .map((row) => (
+                                                        <Flex key={row.method || row.label} justify="space-between" gap={3}>
+                                                            <Text color="gray.600">{row.label || row.method}</Text>
+                                                            <Text fontWeight="bold" color="green.700">
+                                                                {formatAmount(row.amount)} EGP
+                                                                <Text as="span" fontSize="xs" color="gray.500" fontWeight="normal"> ({row.count ?? 0})</Text>
+                                                            </Text>
+                                                        </Flex>
+                                                    ))}
+                                                {(accountSummary.paymentBreakdown ?? []).every((row) => Number(row.amount ?? 0) <= 0) && (
+                                                    <Text fontSize="sm" color="gray.500">لا يوجد دخل حجوزات في الفترة.</Text>
+                                                )}
+                                            </Stack>
+                                        </Box>
+                                        <Box borderWidth="1px" borderColor="gray.100" borderRadius="xl" p={4}>
+                                            <Text fontWeight="bold" color="gray.800" mb={3}>تفاصيل المصروفات</Text>
+                                            <Stack gap={3}>
+                                                {(accountSummary.expensesByCategory ?? []).length === 0 && (
+                                                    <Text fontSize="sm" color="gray.500">لا توجد مصروفات في الفترة.</Text>
+                                                )}
+                                                {(accountSummary.expensesByCategory ?? []).map((category) => (
+                                                    <Box key={`${category.categoryId ?? 'none'}-${category.name}`}>
+                                                        <Flex justify="space-between" gap={3}>
+                                                            <Text fontWeight="bold" color="gray.700">
+                                                                {category.name}
+                                                                <Text as="span" fontSize="xs" color="gray.500" fontWeight="normal"> · {category.count} عملية</Text>
+                                                            </Text>
+                                                            <Text fontWeight="bold" color="red.600">{formatAmount(category.amount)} EGP</Text>
+                                                        </Flex>
+                                                        <Stack gap={1} mt={1} pr={3}>
+                                                            {(category.subcategories ?? []).map((sub) => (
+                                                                <Flex key={`${sub.subcategoryId ?? 'none'}-${sub.name}`} justify="space-between" gap={3}>
+                                                                    <Text fontSize="sm" color="gray.500">{sub.name}</Text>
+                                                                    <Text fontSize="sm" color="gray.700">{formatAmount(sub.amount)} EGP</Text>
+                                                                </Flex>
+                                                            ))}
+                                                        </Stack>
+                                                    </Box>
+                                                ))}
+                                            </Stack>
+                                        </Box>
+                                    </SimpleGrid>
+
+                                    {(accountSummary.manualIncomeEntries ?? []).length > 0 && (
+                                        <Box mt={4} borderWidth="1px" borderColor="gray.100" borderRadius="xl" overflow="hidden">
+                                            <Box bg="gray.50" px={4} py={3}>
+                                                <Text fontWeight="bold" color="gray.800">الدخل اليدوي</Text>
+                                            </Box>
+                                            <Box overflowX="auto">
+                                                <Table.Root size="sm">
+                                                    <Table.Header>
+                                                        <Table.Row>
+                                                            <Table.ColumnHeader textAlign="right">الوصف</Table.ColumnHeader>
+                                                            <Table.ColumnHeader textAlign="right">التاريخ</Table.ColumnHeader>
+                                                            <Table.ColumnHeader textAlign="right">المبلغ</Table.ColumnHeader>
+                                                        </Table.Row>
+                                                    </Table.Header>
+                                                    <Table.Body>
+                                                        {(accountSummary.manualIncomeEntries ?? []).map((entry) => (
+                                                            <Table.Row key={entry.id ?? `${entry.entryDate}-${entry.description}`}>
+                                                                <Table.Cell>{entry.description}</Table.Cell>
+                                                                <Table.Cell>{entry.entryDate}</Table.Cell>
+                                                                <Table.Cell fontWeight="bold" color="teal.700">{formatAmount(entry.amount)} EGP</Table.Cell>
+                                                            </Table.Row>
+                                                        ))}
+                                                    </Table.Body>
+                                                </Table.Root>
+                                            </Box>
+                                        </Box>
+                                    )}
+                                </Card.Body>
+                            </Card.Root>
+                        )}
                         {financialReport && (
                             <Card.Root bg="white" shadow="lg" borderRadius="2xl" overflow="hidden" mb={8}>
                                 <Box
@@ -1062,34 +1199,17 @@ export default function MonthlyAccountsPage() {
 
                                 {financialReportOpen && (
                                 <Card.Body p={{ base: 4, md: 6 }}>
-                                    <SimpleGrid columns={{ base: 1, sm: 2, lg: 6 }} gap={4} mb={6}>
+                                    <SimpleGrid columns={{ base: 1, sm: 2, lg: 3 }} gap={4} mb={4}>
                                         <Card.Root bg="green.50" borderWidth="1px" borderColor="green.100">
                                             <Card.Body p={4}>
                                                 <Text fontSize="xs" color="gray.600" fontWeight="bold">
-                                                    إجمالي قيمة الحجوزات
+                                                    إجمالي الدخل
                                                 </Text>
-                                                <Text fontSize="xl" fontWeight="bold" color="green.700">
-                                                    {formatAmount(financialReport.cards?.totalIncome ?? financialReport.summary?.grossIncome)} EGP
+                                                <Text fontSize="2xl" fontWeight="bold" color="green.700">
+                                                    {formatAmount(financialReport.cards?.totalIncome ?? financialReport.summary?.totalCollected)} EGP
                                                 </Text>
-                                            </Card.Body>
-                                        </Card.Root>
-                                        <Card.Root bg="blue.50" borderWidth="1px" borderColor="blue.100">
-                                            <Card.Body p={4}>
-                                                <Text fontSize="xs" color="gray.600" fontWeight="bold">
-                                                    إجمالي المحصل
-                                                </Text>
-                                                <Text fontSize="xl" fontWeight="bold" color="blue.700">
-                                                    {formatAmount(financialReport.cards?.totalPayments ?? financialReport.summary?.totalCollected)} EGP
-                                                </Text>
-                                            </Card.Body>
-                                        </Card.Root>
-                                        <Card.Root bg="orange.50" borderWidth="1px" borderColor="orange.100">
-                                            <Card.Body p={4}>
-                                                <Text fontSize="xs" color="gray.600" fontWeight="bold">
-                                                    إجمالي المتبقي
-                                                </Text>
-                                                <Text fontSize="xl" fontWeight="bold" color="orange.700">
-                                                    {formatAmount(financialReport.cards?.totalOutstanding ?? financialReport.summary?.totalOutstanding)} EGP
+                                                <Text fontSize="xs" color="gray.500" mt={1}>
+                                                    المبلغ المدفوع فعليًا من الحجوزات المؤكدة
                                                 </Text>
                                             </Card.Body>
                                         </Card.Root>
@@ -1098,32 +1218,59 @@ export default function MonthlyAccountsPage() {
                                                 <Text fontSize="xs" color="gray.600" fontWeight="bold">
                                                     عدد الحجوزات
                                                 </Text>
-                                                <Text fontSize="xl" fontWeight="bold" color="#615b36">
+                                                <Text fontSize="2xl" fontWeight="bold" color="#615b36">
                                                     {financialReport.cards?.totalBookings ?? 0}
                                                 </Text>
-                                            </Card.Body>
-                                        </Card.Root>
-                                        <Card.Root bg="green.50" borderWidth="1px" borderColor="green.100">
-                                            <Card.Body p={4}>
-                                                <Text fontSize="xs" color="gray.600" fontWeight="bold">
-                                                    حالات مدفوعة
-                                                </Text>
-                                                <Text fontSize="xl" fontWeight="bold" color="green.700">
-                                                    {financialReport.cards?.paidCases ?? 0}
+                                                <Text fontSize="xs" color="gray.500" mt={1}>
+                                                    كل حجز مؤكد محسوب مرة واحدة
                                                 </Text>
                                             </Card.Body>
                                         </Card.Root>
-                                        <Card.Root bg="red.50" borderWidth="1px" borderColor="red.100">
+                                        <Card.Root bg="blue.50" borderWidth="1px" borderColor="blue.100">
                                             <Card.Body p={4}>
                                                 <Text fontSize="xs" color="gray.600" fontWeight="bold">
-                                                    حالات غير مدفوعة
+                                                    مجموع وسائل الدفع
                                                 </Text>
-                                                <Text fontSize="xl" fontWeight="bold" color="red.700">
-                                                    {financialReport.cards?.unpaidCases ?? 0}
+                                                <Text fontSize="2xl" fontWeight="bold" color="blue.700">
+                                                    {formatAmount(paymentBreakdownTotal)} EGP
+                                                </Text>
+                                                <Text fontSize="xs" color="gray.500" mt={1}>
+                                                    {paymentBreakdownMatchesIncome ? 'يطابق إجمالي الدخل' : 'راجع تفصيل وسائل الدفع'}
                                                 </Text>
                                             </Card.Body>
                                         </Card.Root>
                                     </SimpleGrid>
+
+                                    <Box p={4} mb={6} bg="white" borderRadius="xl" borderWidth="1px" borderColor="gray.100">
+                                        <Text fontWeight="bold" color="gray.800" mb={3}>
+                                            تفاصيل الدخل حسب طريقة الدفع
+                                        </Text>
+                                        <SimpleGrid columns={{ base: 1, sm: 2, lg: 4 }} gap={3}>
+                                            {paymentBreakdownRows.map((row, idx) => (
+                                                <Box
+                                                    key={`${row.method || row.label}-${idx}`}
+                                                    p={3}
+                                                    borderRadius="lg"
+                                                    bg="#f8f7ef"
+                                                    borderWidth="1px"
+                                                    borderColor="#e8e4d4"
+                                                >
+                                                    <Text fontSize="sm" color="gray.600" fontWeight="bold">
+                                                        {row.label || row.method || 'غير محدد'}
+                                                    </Text>
+                                                    <Text fontSize="xl" fontWeight="bold" color="#615b36" mt={1}>
+                                                        {formatAmount(row.amount)} EGP
+                                                    </Text>
+                                                    <Text fontSize="xs" color="gray.500" mt={1}>
+                                                        {row.count ?? 0} حجز
+                                                    </Text>
+                                                </Box>
+                                            ))}
+                                            {paymentBreakdownRows.length === 0 && (
+                                                <Text fontSize="sm" color="gray.500">لا توجد مدفوعات في الفترة.</Text>
+                                            )}
+                                        </SimpleGrid>
+                                    </Box>
 
                                     <SimpleGrid columns={{ base: 1, lg: 2 }} gap={4} mb={6}>
                                         <Box
@@ -1189,27 +1336,15 @@ export default function MonthlyAccountsPage() {
                                         </Box>
 
                                         <Box p={4} bg="gray.50" borderRadius="xl" borderWidth="1px" borderColor="gray.100">
-                                            <Text fontWeight="bold" color="gray.800" mb={3}>
-                                                توزيع المدفوعات حسب الوسيلة
+                                            <Text fontWeight="bold" color="gray.800" mb={1}>
+                                                الدخل = مجموع طرق الدفع
                                             </Text>
-                                            <Flex gap={2} wrap="wrap">
-                                                {paymentBreakdownRows.map((row, idx) => (
-                                                    <Badge
-                                                        key={`${row.method || row.label}-${idx}`}
-                                                        colorPalette="green"
-                                                        variant="subtle"
-                                                        borderRadius="full"
-                                                        px={3}
-                                                        py={1}
-                                                    >
-                                                        {row.label || row.method || 'غير محدد'}: {formatAmount(row.amount)} EGP
-                                                        {row.count != null ? ` (${row.count})` : ''}
-                                                    </Badge>
-                                                ))}
-                                                {paymentBreakdownRows.length === 0 && (
-                                                    <Text fontSize="sm" color="gray.500">لا توجد مدفوعات في الفترة.</Text>
-                                                )}
-                                            </Flex>
+                                            <Text fontSize="sm" color="gray.600">
+                                                نقدي + فودافون كاش + انستا باي + فيزا = {formatAmount(paymentBreakdownTotal)} EGP
+                                            </Text>
+                                            <Text fontSize="sm" color="gray.600" mt={2}>
+                                                هذا المجموع هو إجمالي الدخل، وهو نفس حساب صفحة الحجوزات لنفس الفترة.
+                                            </Text>
                                         </Box>
                                     </SimpleGrid>
 
@@ -1220,7 +1355,7 @@ export default function MonthlyAccountsPage() {
                                                     حسابات الأطباء
                                                 </Heading>
                                                 <Text fontSize="sm" color="gray.500" mt={1}>
-                                                    إجمالي المستحق والمحصل والمتبقي لكل طبيب داخل الفترة.
+                                                    دخل كل طبيب من الحجوزات المؤكدة في الفترة.
                                                 </Text>
                                             </Box>
                                             <Box overflowX="auto">
@@ -1229,10 +1364,7 @@ export default function MonthlyAccountsPage() {
                                                         <Table.Row>
                                                             <Table.ColumnHeader py={3} px={3} textAlign="right">الطبيب</Table.ColumnHeader>
                                                             <Table.ColumnHeader py={3} px={3} textAlign="right">الحجوزات</Table.ColumnHeader>
-                                                            <Table.ColumnHeader py={3} px={3} textAlign="right">المستحق</Table.ColumnHeader>
-                                                            <Table.ColumnHeader py={3} px={3} textAlign="right">المحصل</Table.ColumnHeader>
-                                                            <Table.ColumnHeader py={3} px={3} textAlign="right">المتبقي</Table.ColumnHeader>
-                                                            <Table.ColumnHeader py={3} px={3} textAlign="right">الحالات</Table.ColumnHeader>
+                                                            <Table.ColumnHeader py={3} px={3} textAlign="right">الدخل</Table.ColumnHeader>
                                                         </Table.Row>
                                                     </Table.Header>
                                                     <Table.Body>
@@ -1250,30 +1382,14 @@ export default function MonthlyAccountsPage() {
                                                                         )}
                                                                     </Table.Cell>
                                                                     <Table.Cell py={3} px={3}>{doctor.totalBookings ?? 0}</Table.Cell>
-                                                                    <Table.Cell py={3} px={3}>{formatAmount(doctor.grossIncome)} EGP</Table.Cell>
                                                                     <Table.Cell py={3} px={3} color="green.700" fontWeight="bold">
-                                                                        {formatAmount(doctor.totalCollected)} EGP
-                                                                    </Table.Cell>
-                                                                    <Table.Cell py={3} px={3} color={Number(doctor.totalOutstanding ?? 0) > 0 ? 'orange.700' : 'gray.500'} fontWeight="bold">
-                                                                        {formatAmount(doctor.totalOutstanding)} EGP
-                                                                    </Table.Cell>
-                                                                    <Table.Cell py={3} px={3}>
-                                                                        <Flex gap={1} wrap="wrap">
-                                                                            <Badge colorPalette="green" variant="subtle">مدفوع {doctor.fullyPaidCases ?? 0}</Badge>
-                                                                            <Badge colorPalette="orange" variant="subtle">متبقي {doctor.outstandingCases ?? 0}</Badge>
-                                                                            {doctor.partialCases != null && (
-                                                                                <Badge colorPalette="yellow" variant="subtle">جزئي {doctor.partialCases}</Badge>
-                                                                            )}
-                                                                            {doctor.overpaidCases != null && doctor.overpaidCases > 0 && (
-                                                                                <Badge colorPalette="purple" variant="subtle">زائد {doctor.overpaidCases}</Badge>
-                                                                            )}
-                                                                        </Flex>
+                                                                        {formatAmount(doctor.totalCollected ?? doctor.grossIncome)} EGP
                                                                     </Table.Cell>
                                                                 </Table.Row>
                                                             ))
                                                         ) : (
                                                             <Table.Row>
-                                                                <Table.Cell colSpan={6} py={8} textAlign="center" color="gray.500">
+                                                                <Table.Cell colSpan={3} py={8} textAlign="center" color="gray.500">
                                                                     لا توجد بيانات أطباء في الفترة.
                                                                 </Table.Cell>
                                                             </Table.Row>
@@ -1298,9 +1414,7 @@ export default function MonthlyAccountsPage() {
                                                         <Table.Row>
                                                             <Table.ColumnHeader py={3} px={3} textAlign="right">الفترة</Table.ColumnHeader>
                                                             <Table.ColumnHeader py={3} px={3} textAlign="right">الحجوزات</Table.ColumnHeader>
-                                                            <Table.ColumnHeader py={3} px={3} textAlign="right">المستحق</Table.ColumnHeader>
-                                                            <Table.ColumnHeader py={3} px={3} textAlign="right">المحصل</Table.ColumnHeader>
-                                                            <Table.ColumnHeader py={3} px={3} textAlign="right">المتبقي</Table.ColumnHeader>
+                                                            <Table.ColumnHeader py={3} px={3} textAlign="right">الدخل</Table.ColumnHeader>
                                                         </Table.Row>
                                                     </Table.Header>
                                                     <Table.Body>
@@ -1309,18 +1423,14 @@ export default function MonthlyAccountsPage() {
                                                                 <Table.Row key={`${row.periodStart ?? 'period'}-${idx}`}>
                                                                     <Table.Cell py={3} px={3}>{row.periodStart || '—'}</Table.Cell>
                                                                     <Table.Cell py={3} px={3}>{row.bookingCount ?? 0}</Table.Cell>
-                                                                    <Table.Cell py={3} px={3}>{formatAmount(row.grossIncome)} EGP</Table.Cell>
                                                                     <Table.Cell py={3} px={3} color="green.700" fontWeight="bold">
-                                                                        {formatAmount(row.totalCollected)} EGP
-                                                                    </Table.Cell>
-                                                                    <Table.Cell py={3} px={3} color={Number(row.totalOutstanding ?? 0) > 0 ? 'orange.700' : 'gray.500'} fontWeight="bold">
-                                                                        {formatAmount(row.totalOutstanding)} EGP
+                                                                        {formatAmount(row.totalCollected ?? row.grossIncome)} EGP
                                                                     </Table.Cell>
                                                                 </Table.Row>
                                                             ))
                                                         ) : (
                                                             <Table.Row>
-                                                                <Table.Cell colSpan={5} py={8} textAlign="center" color="gray.500">
+                                                                <Table.Cell colSpan={3} py={8} textAlign="center" color="gray.500">
                                                                     لا توجد بيانات ترند في الفترة.
                                                                 </Table.Cell>
                                                             </Table.Row>
@@ -1371,13 +1481,10 @@ export default function MonthlyAccountsPage() {
                                                         }}
                                                         style={{ padding: '9px', background: 'transparent', outline: 'none' }}
                                                     >
-                                                        <option value="all">كل حالات الدفع</option>
-                                                        <option value="paid">مدفوع بالكامل</option>
-                                                        <option value="partial">مدفوع جزئيًا</option>
-                                                        <option value="unpaid">غير مدفوع</option>
-                                                        <option value="outstanding">عليه متبقي</option>
-                                                        <option value="with_payment">به أي دفع</option>
-                                                        <option value="without_payment">بدون دفع</option>
+                                                        <option value="all">كل الحجوزات</option>
+                                                        <option value="paid">بها دخل</option>
+                                                        <option value="with_payment">بها دفع</option>
+                                                        <option value="without_payment">بدون مبلغ</option>
                                                     </select>
                                                 </Box>
                                                 <Box bg="white" borderWidth="1px" borderColor="gray.200" borderRadius="md" px={2}>
@@ -1406,17 +1513,14 @@ export default function MonthlyAccountsPage() {
                                                         <Table.ColumnHeader py={3} px={3} textAlign="right">الحالة</Table.ColumnHeader>
                                                         <Table.ColumnHeader py={3} px={3} textAlign="right">التاريخ</Table.ColumnHeader>
                                                         <Table.ColumnHeader py={3} px={3} textAlign="right">الخدمة</Table.ColumnHeader>
-                                                        <Table.ColumnHeader py={3} px={3} textAlign="right">قيمة الحجز</Table.ColumnHeader>
-                                                        <Table.ColumnHeader py={3} px={3} textAlign="right">المدفوع</Table.ColumnHeader>
-                                                        <Table.ColumnHeader py={3} px={3} textAlign="right">المتبقي</Table.ColumnHeader>
-                                                        <Table.ColumnHeader py={3} px={3} textAlign="right">حالة الدفع</Table.ColumnHeader>
+                                                        <Table.ColumnHeader py={3} px={3} textAlign="right">الدخل</Table.ColumnHeader>
                                                         <Table.ColumnHeader py={3} px={3} textAlign="right">طرق الدفع</Table.ColumnHeader>
                                                     </Table.Row>
                                                 </Table.Header>
                                                 <Table.Body>
                                                     {isFinancialCasesLoading ? (
                                                         <Table.Row>
-                                                            <Table.Cell colSpan={8} py={10} textAlign="center">
+                                                            <Table.Cell colSpan={5} py={10} textAlign="center">
                                                                 <Spinner color="#615b36" />
                                                             </Table.Cell>
                                                         </Table.Row>
@@ -1435,16 +1539,7 @@ export default function MonthlyAccountsPage() {
                                                                 </Table.Cell>
                                                                 <Table.Cell py={3} px={3} color="gray.600">{row.bookingDate || '—'}</Table.Cell>
                                                                 <Table.Cell py={3} px={3}>{row.service || '—'}</Table.Cell>
-                                                                <Table.Cell py={3} px={3}>{formatAmount(row.totalAmount ?? row.bookingValue)} EGP</Table.Cell>
                                                                 <Table.Cell py={3} px={3} color="green.700" fontWeight="bold">{formatAmount(row.amountPaid)} EGP</Table.Cell>
-                                                                <Table.Cell py={3} px={3} color={Number(row.remainingAmount ?? 0) > 0 ? 'orange.700' : 'gray.500'} fontWeight="bold">
-                                                                    {formatAmount(row.remainingAmount)} EGP
-                                                                </Table.Cell>
-                                                                <Table.Cell py={3} px={3}>
-                                                                    <Badge colorPalette={paymentStatusColor(row.paymentStatus)} variant="subtle" borderRadius="full">
-                                                                        {row.paymentStatusLabel || row.paymentStatus || 'غير محدد'}
-                                                                    </Badge>
-                                                                </Table.Cell>
                                                                 <Table.Cell py={3} px={3}>
                                                                     <Flex gap={1} wrap="wrap">
                                                                         {(row.paymentMethods ?? []).map((payment, idx) => (
@@ -1459,7 +1554,7 @@ export default function MonthlyAccountsPage() {
                                                         ))
                                                     ) : (
                                                         <Table.Row>
-                                                            <Table.Cell colSpan={8} py={10} textAlign="center" color="gray.500">
+                                                            <Table.Cell colSpan={5} py={10} textAlign="center" color="gray.500">
                                                                 لا توجد حالات مطابقة.
                                                             </Table.Cell>
                                                         </Table.Row>
@@ -1760,6 +1855,19 @@ export default function MonthlyAccountsPage() {
                                     </Flex>
                                 </Card.Header>
                                 <Card.Body p={5}>
+                                    {(expenses?.byCategory ?? []).length > 0 && (
+                                        <SimpleGrid columns={{ base: 1, sm: 2, lg: 3 }} gap={3} mb={5}>
+                                            {(expenses?.byCategory ?? []).map((category) => (
+                                                <Box key={`exp-${category.categoryId ?? category.name}`} p={3} bg="red.50" borderRadius="lg" borderWidth="1px" borderColor="red.100">
+                                                    <Flex justify="space-between" gap={2}>
+                                                        <Text fontWeight="bold" color="gray.700">{category.name}</Text>
+                                                        <Text fontWeight="bold" color="red.700">{formatAmount(category.amount)} EGP</Text>
+                                                    </Flex>
+                                                    <Text fontSize="xs" color="gray.500" mt={1}>{category.count} عملية</Text>
+                                                </Box>
+                                            ))}
+                                        </SimpleGrid>
+                                    )}
                                     {expenses && expenses.expenses?.length > 0 ? (
                                         <>
                                             <Flex justify="space-between" align="center" mb={4} flexWrap="wrap" gap={3}>

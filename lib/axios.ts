@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const api = axios.create({
-  baseURL: "http://localhost:8000/api",
+  baseURL: "https://api.dr-reematef.com/api",
   // ❌ لا تحدد Content-Type هنا — axios بيحدده تلقائياً:
   //   - application/json    → لما تبعت object عادي
   //   - multipart/form-data → لما تبعت FormData (مع الـ boundary تلقائياً)

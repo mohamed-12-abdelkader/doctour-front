@@ -2382,7 +2382,7 @@ export default function TodayBookings() {
                           fontSize="xs"
                           fontWeight="bold"
                         >
-                          {row.label}: {formatBookingAmount(row.amount)} EGP
+                          {row.label}: {formatBookingAmount(row.amount ?? 0)} EGP
                         </Badge>
                       ))}
                     </Flex>

@@ -101,9 +101,7 @@ function NavLinkPill({
 
   return (
     <Box
-      as={Link}
-      href={href}
-      onClick={onClick}
+      asChild
       fontSize={fontSize}
       fontWeight={active ? "bold" : "semibold"}
       color={active ? "white" : BRAND.color}
@@ -119,7 +117,9 @@ function NavLinkPill({
         color: active ? "white" : BRAND.colorHover,
       }}
     >
-      {children}
+      <Link href={href} onClick={onClick}>
+        {children}
+      </Link>
     </Box>
   );
 }
@@ -203,9 +203,7 @@ function MobileAdminLink({
   const Icon = link.icon;
   return (
     <Box
-      as={Link}
-      href={link.href}
-      onClick={onNavigate}
+      asChild
       display="flex"
       alignItems="center"
       gap={3}
@@ -221,17 +219,19 @@ function MobileAdminLink({
       _hover={{ bg: "blackAlpha.50", textDecoration: "none" }}
       transition="background 0.15s"
     >
-      <Box p={2} borderRadius="lg" bg={link.bg} color={link.color} flexShrink={0}>
-        <Icon size={18} />
-      </Box>
-      <Box flex={1} minW={0}>
-        <Text fontSize="sm" lineHeight="short">
-          {link.title}
-        </Text>
-        <Text fontSize="xs" color="gray.500" lineClamp={1}>
-          {link.description}
-        </Text>
-      </Box>
+      <Link href={link.href} onClick={onNavigate}>
+        <Box p={2} borderRadius="lg" bg={link.bg} color={link.color} flexShrink={0}>
+          <Icon size={18} />
+        </Box>
+        <Box flex={1} minW={0}>
+          <Text fontSize="sm" lineHeight="short">
+            {link.title}
+          </Text>
+          <Text fontSize="xs" color="gray.500" lineClamp={1}>
+            {link.description}
+          </Text>
+        </Box>
+      </Link>
     </Box>
   );
 }
@@ -516,19 +516,18 @@ export default function Navbar() {
                     تسجيل خروج
                   </Button>
                 )}
-                <Box
-                  as={Link}
-                  href={
-                    isDoctorNav
-                      ? "/doctor-appointments"
-                      : isAdminNav
-                        ? "/admin/dashboard"
-                        : "/"
-                  }
-                  _hover={{ opacity: 0.9 }}
-                  transition="opacity 0.2s"
-                >
-                  <Logo />
+                <Box asChild _hover={{ opacity: 0.9 }} transition="opacity 0.2s">
+                  <Link
+                    href={
+                      isDoctorNav
+                        ? "/doctor-appointments"
+                        : isAdminNav
+                          ? "/admin/dashboard"
+                          : "/"
+                    }
+                  >
+                    <Logo />
+                  </Link>
                 </Box>
               </Flex>
             </Flex>

@@ -416,7 +416,7 @@ export default function MonthlyAccountsPage() {
                 sortDir: 'desc',
             }
             for (const [key, value] of Object.entries(financialCasesPeriodParams)) {
-                if (value != null) params[key] = value
+                if (typeof value === 'string' || typeof value === 'number') params[key] = value
             }
             if (financialPaymentStatus !== 'all') params.paymentStatus = financialPaymentStatus
             if (financialPaymentMethod !== 'all') params.paymentMethod = financialPaymentMethod
